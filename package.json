@@ -1,0 +1,13 @@
+{
+  "name": "soq-libya",
+  "version": "1.0.0",
+  "scripts": {
+    "install-all": "cd backend && npm install && cd ../frontend/dashboard && npm install",
+    "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend/dashboard && npm run dev\"",
+    "build": "cd frontend/dashboard && npm run build",
+    "start": "cd backend && npm start"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}
