@@ -40,12 +40,17 @@ router.get('/:productId', async (req, res) => {
 
 // إضافة منتج جديد
 router.post('/', checkAuth, async (req, res) => {
-  const { sellerId, name, description, price, images, stock, category, city } = req.body;
+  const { name, description, price, images, stock, category, city } = req.body;
+  if (req.userRole !== 'seller' && req.userRole !== 'admin') return res.status(403).json({ error: 'حساب البائع مطلوب لإضافة المنتجات' });
+  const cleanName = typeof name === 'string' ? name.trim() : '';
+  const numericPrice = Number(price);
+  const numericStock = Number(stock ?? 1);
+  if (!cleanName || cleanName.length > 255 || !Number.isFinite(numericPrice) || numericPrice <= 0 || numericPrice > 100000000 || !Number.isInteger(numericStock) || numericStock < 0 || numericStock > 1000000 || (images != null && (!Array.isArray(images) || images.length > 10))) return res.status(400).json({ error: 'بيانات المنتج غير صحيحة' });
   try {
     const result = await pool.query(
       `INSERT INTO products (seller_id, name, description, price, images, stock, category, city) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [sellerId, name, description, price, images, stock, category, city]
+      [req.userId, cleanName, typeof description === 'string' ? description.slice(0, 5000) : '', numericPrice, Array.isArray(images) ? images : [], numericStock, typeof category === 'string' ? category.slice(0, 50) : null, typeof city === 'string' ? city.slice(0, 50) : null]
     );
     res.json({ success: true, product: result.rows[0] });
   } catch (error) {
@@ -58,11 +63,12 @@ router.put('/:productId', checkAuth, async (req, res) => {
   const { name, description, price, images, stock, category, city } = req.body;
   const productId = req.params.productId;
   const userId = req.userId;
+  if (req.userRole !== 'seller' && req.userRole !== 'admin') return res.status(403).json({ error: 'صلاحية البائع مطلوبة' });
 
   try {
     const productCheck = await pool.query('SELECT seller_id FROM products WHERE id = $1', [productId]);
     if (productCheck.rows.length === 0) return res.status(404).json({ error: 'المنتج غير موجود' });
-    if (productCheck.rows[0].seller_id != userId) return res.status(403).json({ error: 'غير مصرح' });
+    if (req.userRole !== 'admin' && Number(productCheck.rows[0].seller_id) !== Number(userId)) return res.status(403).json({ error: 'غير مصرح' });
 
     await pool.query(
       `UPDATE products SET 
