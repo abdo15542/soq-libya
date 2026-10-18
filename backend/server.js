@@ -142,31 +142,86 @@ const createTables = async () => {
 };
 createTables();
 
-// Socket.io للمحادثة
+// Socket.IO chat access control. The current client identity is transitional:
+// x-user-id is not cryptographic proof and must be replaced by a verified session/JWT
+// before public launch. Still enforce order participation and never trust senderId.
+io.use(async (socket, next) => {
+  const rawUserId = socket.handshake.auth && socket.handshake.auth.userId;
+  const userId = Number(rawUserId);
+  if (!Number.isSafeInteger(userId) || userId < 1) {
+    return next(new Error('UNAUTHORIZED'));
+  }
+  try {
+    const user = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
+    if (!user.rowCount) return next(new Error('UNAUTHORIZED'));
+    socket.data.userId = Number(user.rows[0].id);
+    socket.data.userRole = user.rows[0].role || 'customer';
+    return next();
+  } catch (error) {
+    console.error('Socket authentication failed:', error);
+    return next(new Error('AUTH_UNAVAILABLE'));
+  }
+});
+
+const canAccessOrder = async (userId, userRole, orderId) => {
+  if (userRole === 'admin') return true;
+  const result = await pool.query(
+    'SELECT id FROM orders WHERE id = $1 AND (customer_id = $2 OR seller_id = $2 OR driver_id = $2)',
+    [orderId, userId]
+  );
+  return result.rowCount > 0;
+};
+
 io.on('connection', (socket) => {
-  console.log('مستخدم متصل:', socket.id);
-  
-  socket.on('join-order-room', (orderId) => {
-    socket.join(`order-${orderId}`);
-  });
-  
-  socket.on('send-message', async (data) => {
-    const { orderId, senderId, message } = data;
+  socket.on('join-order-room', async (rawOrderId, acknowledge) => {
+    const orderId = Number(rawOrderId);
+    if (!Number.isSafeInteger(orderId) || orderId < 1) {
+      if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'INVALID_ORDER' });
+      return;
+    }
     try {
-      await pool.query(
-        'INSERT INTO chats (order_id, sender_id, message) VALUES ($1, $2, $3)',
-        [orderId, senderId, message]
-      );
-      io.to(`order-${orderId}`).emit('new-message', {
-        senderId, message, sentAt: new Date()
-      });
-    } catch (err) {
-      console.error(err);
+      if (!(await canAccessOrder(socket.data.userId, socket.data.userRole, orderId))) {
+        if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'FORBIDDEN' });
+        return;
+      }
+      socket.join(`order-${orderId}`);
+      if (typeof acknowledge === 'function') acknowledge({ success: true });
+    } catch (error) {
+      console.error('Socket room authorization failed:', error);
+      if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'SERVER_ERROR' });
     }
   });
-  
-  socket.on('disconnect', () => {
-    console.log('مستخدم قطع الاتصال:', socket.id);
+
+  socket.on('send-message', async (data, acknowledge) => {
+    const orderId = Number(data && data.orderId);
+    const message = typeof (data && data.message) === 'string' ? data.message.trim() : '';
+    if (!Number.isSafeInteger(orderId) || orderId < 1 || !message || message.length > 2000) {
+      if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'INVALID_MESSAGE' });
+      return;
+    }
+    try {
+      if (!(await canAccessOrder(socket.data.userId, socket.data.userRole, orderId))) {
+        if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'FORBIDDEN' });
+        return;
+      }
+      const inserted = await pool.query(
+        'INSERT INTO chats (order_id, sender_id, message) VALUES ($1, $2, $3) RETURNING id, sent_at',
+        [orderId, socket.data.userId, message]
+      );
+      io.to(`order-${orderId}`).emit('new-message', {
+        id: inserted.rows[0].id,
+        order_id: orderId,
+        sender_id: socket.data.userId,
+        senderId: socket.data.userId,
+        message,
+        sent_at: inserted.rows[0].sent_at,
+        sentAt: inserted.rows[0].sent_at
+      });
+      if (typeof acknowledge === 'function') acknowledge({ success: true });
+    } catch (error) {
+      console.error('Socket message send failed:', error);
+      if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'SERVER_ERROR' });
+    }
   });
 });
 
