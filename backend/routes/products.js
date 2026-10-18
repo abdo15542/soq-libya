@@ -70,8 +70,21 @@ router.put('/:productId', checkAuth, async (req, res) => {
     if (productCheck.rows.length === 0) return res.status(404).json({ error: 'المنتج غير موجود' });
     if (req.userRole !== 'admin' && Number(productCheck.rows[0].seller_id) !== Number(userId)) return res.status(403).json({ error: 'غير مصرح' });
 
-    await pool.query(
-      `UPDATE products SET 
+    const cleanName = name === undefined ? null : (typeof name === 'string' ? name.trim() : '');
+    const cleanDescription = description === undefined ? null : (typeof description === 'string' ? description.slice(0, 5000) : '');
+    const numericPrice = price === undefined ? null : Number(price);
+    const numericStock = stock === undefined ? null : Number(stock);
+    const cleanImages = images === undefined ? null : images;
+    const cleanCategory = category === undefined ? null : (typeof category === 'string' ? category.slice(0, 50) : null);
+    const cleanCity = city === undefined ? null : (typeof city === 'string' ? city.slice(0, 50) : null);
+    if ((cleanName !== null && (!cleanName || cleanName.length > 255)) ||
+        (numericPrice !== null && (!Number.isFinite(numericPrice) || numericPrice <= 0 || numericPrice > 100000000)) ||
+        (numericStock !== null && (!Number.isInteger(numericStock) || numericStock < 0 || numericStock > 1000000)) ||
+        (cleanImages !== null && (!Array.isArray(cleanImages) || cleanImages.length > 10 || cleanImages.some((image) => typeof image !== 'string' || image.length > 2000)))) {
+      return res.status(400).json({ error: 'بيانات المنتج غير صحيحة' });
+    }
+    const updated = await pool.query(
+      `UPDATE products SET
         name = COALESCE($1, name),
         description = COALESCE($2, description),
         price = COALESCE($3, price),
@@ -79,10 +92,10 @@ router.put('/:productId', checkAuth, async (req, res) => {
         stock = COALESCE($5, stock),
         category = COALESCE($6, category),
         city = COALESCE($7, city)
-       WHERE id = $8`,
-      [name, description, price, images, stock, category, city, productId]
+       WHERE id = $8 RETURNING *`,
+      [cleanName, cleanDescription, numericPrice, cleanImages, numericStock, cleanCategory, cleanCity, productId]
     );
-    res.json({ success: true, message: 'تم تحديث المنتج' });
+    return res.json({ success: true, product: updated.rows[0] });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -96,7 +109,7 @@ router.delete('/:productId', checkAuth, async (req, res) => {
   try {
     const productCheck = await pool.query('SELECT seller_id FROM products WHERE id = $1', [productId]);
     if (productCheck.rows.length === 0) return res.status(404).json({ error: 'المنتج غير موجود' });
-    if (productCheck.rows[0].seller_id != userId) return res.status(403).json({ error: 'غير مصرح' });
+    if (req.userRole !== 'admin' && Number(productCheck.rows[0].seller_id) !== Number(userId)) return res.status(403).json({ error: 'غير مصرح' });
 
     await pool.query('UPDATE products SET stock = 0 WHERE id = $1', [productId]);
     res.json({ success: true });
