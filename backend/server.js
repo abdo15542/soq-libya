@@ -138,9 +138,9 @@ const createTables = async () => {
     console.log('✅ تم إنشاء الجداول بنجاح');
   } catch (err) {
     console.error('❌ خطأ في إنشاء الجداول:', err);
+    throw err;
   }
 };
-createTables();
 
 // Socket.IO chat access control. The current client identity is transitional:
 // x-user-id is not cryptographic proof and must be replaced by a verified session/JWT
@@ -245,6 +245,19 @@ cron.schedule('0 0 * * 0', () => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 السوق الليبي يعمل على المنفذ ${PORT}`);
-});
+
+// Do not accept traffic until the database schema is initialized successfully.
+const startServer = async () => {
+  try {
+    await createTables();
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 السوق الليبي يعمل على المنفذ ${PORT}`);
+    });
+  } catch (error) {
+    console.error('تعذر تشغيل الخادم لأن قاعدة البيانات غير جاهزة.');
+    process.exitCode = 1;
+    server.close(() => process.exit(1));
+  }
+};
+
+startServer();
