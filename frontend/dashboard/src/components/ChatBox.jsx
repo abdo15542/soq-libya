@@ -2,7 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import api from '../utils/api';
 
-const socket = io(import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000');
+const storedUser = (() => {
+  try { return JSON.parse(localStorage.getItem('soq_user') || 'null'); }
+  catch { return null; }
+})();
+const socket = io(import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000', {
+  autoConnect: Boolean(storedUser?.id),
+  auth: { userId: storedUser?.id }
+});
 
 const ChatBox = ({ orderId, userId }) => {
   const [messages, setMessages] = useState([]);
@@ -27,7 +34,7 @@ const ChatBox = ({ orderId, userId }) => {
   const sendMessage = (e) => {
     e.preventDefault();
     if (!newMsg.trim()) return;
-    socket.emit('send-message', { orderId, senderId: userId, message: newMsg });
+    socket.emit('send-message', { orderId, message: newMsg });
     setNewMsg('');
   };
 
