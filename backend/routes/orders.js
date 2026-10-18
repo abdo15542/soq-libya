@@ -3,18 +3,72 @@ const router = express.Router();
 const { Pool } = require('pg');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
-// إنشاء طلب جديد
+// إنشاء طلب جديد: السعر والبائع يُؤخذان من قاعدة البيانات وليس من بيانات العميل
 router.post('/', async (req, res) => {
-  const { customerId, sellerId, productId, totalAmount, deliveryFee, customerAddress } = req.body;
+  const customerId = Number(req.body.customerId);
+  const productId = Number(req.body.productId);
+  const customerAddress = String(req.body.customerAddress || '').trim();
+  const deliveryFee = Number(req.body.deliveryFee ?? 0);
+
+  if (!Number.isInteger(customerId) || customerId < 1 ||
+      !Number.isInteger(productId) || productId < 1 ||
+      !customerAddress || customerAddress.length > 1000 ||
+      !Number.isFinite(deliveryFee) || deliveryFee < 0 || deliveryFee > 1000) {
+    return res.status(400).json({ error: 'بيانات الطلب غير صحيحة' });
+  }
+
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
-      `INSERT INTO orders (customer_id, seller_id, product_id, total_amount, delivery_fee, customer_address, status) 
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING *`,
-      [customerId, sellerId, productId, totalAmount, deliveryFee, customerAddress]
+    await client.query('BEGIN');
+
+    const customer = await client.query(
+      'SELECT id FROM users WHERE id = $1',
+      [customerId]
     );
-    res.json({ success: true, order: result.rows[0] });
+    if (!customer.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'حساب الزبون غير موجود' });
+    }
+
+    const productResult = await client.query(
+      'SELECT id, seller_id, price, stock FROM products WHERE id = $1 FOR UPDATE',
+      [productId]
+    );
+    if (!productResult.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'المنتج غير موجود' });
+    }
+
+    const product = productResult.rows[0];
+    const price = Number(product.price);
+    if (!Number.isFinite(price) || price <= 0 || Number(product.stock) < 1) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'المنتج غير متوفر حاليًا' });
+    }
+
+    const totalAmount = Number((price + deliveryFee).toFixed(2));
+    const result = await client.query(
+      `INSERT INTO orders
+        (customer_id, seller_id, product_id, total_amount, delivery_fee, customer_address, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+       RETURNING *`,
+      [customerId, product.seller_id, productId, totalAmount, deliveryFee, customerAddress]
+    );
+
+    // حجز وحدة واحدة لمنع تجاوز المخزون في الطلبات المتزامنة
+    await client.query(
+      'UPDATE products SET stock = stock - 1 WHERE id = $1 AND stock > 0',
+      [productId]
+    );
+
+    await client.query('COMMIT');
+    return res.status(201).json({ success: true, order: result.rows[0] });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Create order failed:', error);
+    return res.status(500).json({ error: 'تعذر إنشاء الطلب حاليًا' });
+  } finally {
+    client.release();
   }
 });
 
