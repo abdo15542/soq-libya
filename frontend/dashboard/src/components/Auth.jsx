@@ -28,9 +28,19 @@ const Auth = ({ setUser }) => {
         }
       }
     } catch (err) {
-      alert('خطأ في الاتصال');
+      const status = err.response?.status;
+      const serverMessage = err.response?.data?.error || err.response?.data?.message;
+      const message = !err.response
+        ? 'تعذر الوصول إلى الخادم. تحقق من الإنترنت وأن عنوان API صحيح.'
+        : serverMessage || (status === 404
+          ? 'مسار تسجيل الدخول غير موجود على الخادم.'
+          : status >= 500
+            ? 'حدث خطأ في الخادم. حاول لاحقًا.'
+            : 'تعذر تسجيل الدخول. تحقق من رقم الهاتف.');
+      alert(message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleVerification = async (e) => {
@@ -48,9 +58,10 @@ const Auth = ({ setUser }) => {
       setUser(userRes.data);
       localStorage.setItem('soq_user', JSON.stringify(userRes.data));
     } catch (err) {
-      alert('فشل التوثيق');
+      alert(err.response?.data?.error || 'تعذر توثيق الحساب. تحقق من الاتصال ثم أعد المحاولة.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleFileChange = async (e, setter) => {
