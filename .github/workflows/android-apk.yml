@@ -8,6 +8,7 @@ on:
       - feat/production-hardening-android-apk
     paths:
       - 'frontend/dashboard/**'
+      - 'backend/**'
       - '.github/workflows/android-apk.yml'
 
 permissions:
