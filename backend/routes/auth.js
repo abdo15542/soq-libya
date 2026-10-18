@@ -62,17 +62,38 @@ router.post('/phone', async (req, res) => {
   }
 });
 
-// توثيق الحساب (رفع الوثائق والسيلفي)
+// استلام طلب التوثيق: لا يُعتبر الحساب موثقًا تلقائيًا عند رفع الصور.
+// يلزم فحص الوثائق واعتمادها من الإدارة قبل تفعيل صلاحيات البيع أو التوصيل.
 router.post('/verify', async (req, res) => {
   const { userId, idImage, selfieImage, fullName, role } = req.body;
+  const id = Number(userId);
+  const allowedRoles = ['customer', 'seller', 'driver'];
+  if (!Number.isSafeInteger(id) || id < 1 ||
+      typeof fullName !== 'string' || fullName.trim().length < 2 || fullName.trim().length > 100 ||
+      typeof idImage !== 'string' || idImage.length < 20 || idImage.length > 5_000_000 ||
+      typeof selfieImage !== 'string' || selfieImage.length < 20 || selfieImage.length > 5_000_000 ||
+      !allowedRoles.includes(role)) {
+    return res.status(400).json({ error: 'بيانات التوثيق غير مكتملة أو غير صحيحة' });
+  }
+
   try {
+    const existing = await pool.query('SELECT id, verified FROM users WHERE id = $1', [id]);
+    if (!existing.rowCount) return res.status(404).json({ error: 'الحساب غير موجود' });
+
+    // Store the requested role only as a pending request would require a separate schema;
+    // therefore only customer role is kept until admin approval.
     await pool.query(
-      'UPDATE users SET id_image = $1, selfie_image = $2, full_name = $3, role = $4, verified = TRUE WHERE id = $5',
-      [idImage, selfieImage, fullName, role, userId]
+      'UPDATE users SET id_image = $1, selfie_image = $2, full_name = $3, role = $4, verified = FALSE WHERE id = $5',
+      [idImage, selfieImage, fullName.trim(), 'customer', id]
     );
-    res.json({ success: true, message: 'تم توثيق الحساب بنجاح' });
+    return res.status(202).json({
+      success: true,
+      pendingReview: true,
+      message: 'تم استلام طلب التوثيق وهو بانتظار مراجعة الإدارة'
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Verification submission failed:', error);
+    return res.status(500).json({ error: 'تعذر حفظ طلب التوثيق حاليًا' });
   }
 });
 
@@ -89,15 +110,6 @@ router.get('/me/:userId', async (req, res) => {
   }
 });
 
-// تغيير الدور (للمستخدمين غير الموثقين)
-router.put('/role/:userId', async (req, res) => {
-  const { role } = req.body;
-  try {
-    await pool.query('UPDATE users SET role = $1 WHERE id = $2', [role, req.params.userId]);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// لا يوجد endpoint عام لتغيير الدور؛ التغيير الإداري يجب أن يمر عبر مسار إدارة محمي.
 
 module.exports = router;
