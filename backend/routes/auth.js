@@ -3,6 +3,7 @@ const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const { Pool } = require('pg');
 const { encrypt, decrypt } = require('../utils/crypto');
+const { checkAuth } = require('../middleware/auth');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
 // تسجيل/دخول برقم الهاتف
@@ -64,10 +65,11 @@ router.post('/phone', async (req, res) => {
 
 // استلام طلب التوثيق: لا يُعتبر الحساب موثقًا تلقائيًا عند رفع الصور.
 // يلزم فحص الوثائق واعتمادها من الإدارة قبل تفعيل صلاحيات البيع أو التوصيل.
-router.post('/verify', async (req, res) => {
+router.post('/verify', checkAuth, async (req, res) => {
   const { userId, idImage, selfieImage, fullName, role } = req.body;
   const id = Number(userId);
   const allowedRoles = ['customer', 'seller', 'driver'];
+  if (id !== Number(req.userId)) return res.status(403).json({ error: 'لا يمكنك إرسال وثائق لحساب آخر' });
   if (!Number.isSafeInteger(id) || id < 1 ||
       typeof fullName !== 'string' || fullName.trim().length < 2 || fullName.trim().length > 100 ||
       typeof idImage !== 'string' || idImage.length < 20 || idImage.length > 5_000_000 ||
@@ -98,7 +100,10 @@ router.post('/verify', async (req, res) => {
 });
 
 // جلب بيانات المستخدم
-router.get('/me/:userId', async (req, res) => {
+router.get('/me/:userId', checkAuth, async (req, res) => {
+  if (Number(req.params.userId) !== Number(req.userId) && req.userRole !== 'admin') {
+    return res.status(403).json({ error: 'غير مصرح بعرض بيانات هذا الحساب' });
+  }
   try {
     const result = await pool.query('SELECT id, phone, full_name, role, verified, rating FROM users WHERE id = $1', [req.params.userId]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'المستخدم غير موجود' });
