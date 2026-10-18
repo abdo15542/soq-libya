@@ -8,7 +8,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process
 // تسجيل/دخول برقم الهاتف
 // توحيد رقم الهاتف الليبي قبل التحقق والتخزين
 const normalizeLibyanPhone = (value) => {
-  let phone = String(value || '').replace(/[\\s().-]/g, '');
+  let phone = String(value || '').replace(/[\s().-]/g, '');
   if (phone.startsWith('+218')) phone = '0' + phone.slice(4);
   else if (phone.startsWith('218')) phone = '0' + phone.slice(3);
   return phone;
@@ -17,7 +17,7 @@ const normalizeLibyanPhone = (value) => {
 router.post('/phone', async (req, res) => {
   const phone = normalizeLibyanPhone(req.body.phone);
   // أرقام المحمول الليبية المحلية: 09xxxxxxxx أو 091/092/094/095/096/.... ضمن 10 أرقام
-  if (!/^09\\d{8}$/.test(phone)) {
+  if (!/^09\d{8}$/.test(phone)) {
     return res.status(400).json({ error: 'أدخل رقم هاتف ليبي صحيحًا مثل 0912345678', code: 'INVALID_PHONE' });
   }
 
