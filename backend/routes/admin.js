@@ -32,7 +32,7 @@ router.get('/stats', async (req, res) => {
 router.get('/sellers', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT u.*, COALESCE(SUM(o.total_amount), 0) as total_sales
+      SELECT u.id, u.full_name, u.role, u.verified, u.rating, u.created_at, COALESCE(SUM(o.total_amount), 0) as total_sales
       FROM users u
       LEFT JOIN orders o ON u.id = o.seller_id AND o.status = 'delivered'
       WHERE u.role = 'seller'
@@ -49,7 +49,7 @@ router.get('/sellers', async (req, res) => {
 router.get('/drivers', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT u.*, COUNT(o.id) as total_deliveries
+      SELECT u.id, u.full_name, u.role, u.verified, u.rating, u.created_at, COUNT(o.id) as total_deliveries
       FROM users u
       LEFT JOIN orders o ON u.id = o.driver_id AND o.status = 'delivered'
       WHERE u.role = 'driver'
