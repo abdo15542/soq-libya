@@ -6,37 +6,60 @@ const { encrypt, decrypt } = require('../utils/crypto');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
 // تسجيل/دخول برقم الهاتف
-router.post('/phone',
-  body('phone').isMobilePhone('ar-LY').withMessage('رقم هاتف ليبي غير صالح'),
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-    
-    const { phone } = req.body;
-    try {
-      const encryptedPhone = encrypt(phone);
-      let result = await pool.query('SELECT * FROM users WHERE phone = $1', [encryptedPhone]);
-      
-      if (result.rows.length === 0) {
-        result = await pool.query(
-          'INSERT INTO users (phone) VALUES ($1) RETURNING *',
-          [encryptedPhone]
-        );
+// توحيد رقم الهاتف الليبي قبل التحقق والتخزين
+const normalizeLibyanPhone = (value) => {
+  let phone = String(value || '').replace(/[\\s().-]/g, '');
+  if (phone.startsWith('+218')) phone = '0' + phone.slice(4);
+  else if (phone.startsWith('218')) phone = '0' + phone.slice(3);
+  return phone;
+};
+
+router.post('/phone', async (req, res) => {
+  const phone = normalizeLibyanPhone(req.body.phone);
+  // أرقام المحمول الليبية المحلية: 09xxxxxxxx أو 091/092/094/095/096/.... ضمن 10 أرقام
+  if (!/^09\\d{8}$/.test(phone)) {
+    return res.status(400).json({ error: 'أدخل رقم هاتف ليبي صحيحًا مثل 0912345678', code: 'INVALID_PHONE' });
+  }
+
+  try {
+    // التشفير يستخدم IV عشوائيًا، لذلك لا يمكن البحث بمقارنة النص المشفر.
+    // نفك تشفير الأرقام الموجودة ونقارن الرقم الموحّد لتفادي إنشاء حساب جديد في كل محاولة.
+    const existing = await pool.query('SELECT * FROM users ORDER BY id ASC');
+    let user = null;
+    for (const row of existing.rows) {
+      try {
+        if (normalizeLibyanPhone(decrypt(row.phone)) === phone) {
+          user = row;
+          break;
+        }
+      } catch (decryptError) {
+        // تجاهل السجل غير القابل لفك التشفير؛ لا نعرض بياناته للعميل.
       }
-      
-      const user = result.rows[0];
-      res.json({ 
-        success: true, 
-        user: { 
-          ...user, 
-          phone: decrypt(user.phone) // نعيد الرقم الأصلي للاستجابة فقط
-        } 
-      });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
     }
+
+    if (!user) {
+      const inserted = await pool.query(
+        'INSERT INTO users (phone, role, verified) VALUES ($1, $2, FALSE) RETURNING *',
+        [encrypt(phone), 'customer']
+      );
+      user = inserted.rows[0];
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        phone,
+        full_name: user.full_name,
+        role: user.role || 'customer',
+        verified: Boolean(user.verified),
+        rating: user.rating
+      }
+    });
+  } catch (error) {
+    console.error('Phone sign-in failed:', error);
+    res.status(500).json({ error: 'تعذر إكمال تسجيل الدخول حاليًا', code: 'AUTH_SERVER_ERROR' });
+  }
 });
 
 // توثيق الحساب (رفع الوثائق والسيلفي)
