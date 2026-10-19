@@ -38,7 +38,7 @@ const VerificationRequest = () => {
       <label>الاسم الكامل</label>
       <input value={fullName} onChange={e => setFullName(e.target.value)} required minLength={2} maxLength={100} />
       <label>نوع الحساب المطلوب</label>
-      <select value={requestedRole} onChange={e => setRequestedRole(e.target.value)}><option value="seller">بائع</option><option value="driver">مندوب توصيل</option><option value="customer">زبون فقط</option></select>
+      <select value={requestedRole} onChange={e => setRequestedRole(e.target.value)}><option value="seller">بائع</option><option value="driver">مندوب توصيل</option></select>
       <label>صورة جواز السفر أو البطاقة</label>
       <input type="file" accept="image/*" onChange={e => handleFile(e, setIdImage)} required />
       <label>صورة سيلفي مع الوثيقة</label>
