@@ -49,7 +49,12 @@ router.post('/', checkAuth, async (req, res) => {
   const cleanName = typeof name === 'string' ? name.trim() : '';
   const numericPrice = Number(price);
   const numericStock = Number(stock ?? 1);
-  if (!cleanName || cleanName.length > 255 || !Number.isFinite(numericPrice) || numericPrice <= 0 || numericPrice > 100000000 || !Number.isInteger(numericStock) || numericStock < 0 || numericStock > 1000000 || (images != null && (!Array.isArray(images) || images.length > 10))) return res.status(400).json({ error: 'بيانات المنتج غير صحيحة' });
+  if (!cleanName || cleanName.length > 255 || !Number.isFinite(numericPrice) || numericPrice <= 0 || numericPrice > 100000000
+    || !Number.isInteger(numericStock) || numericStock < 0 || numericStock > 1000000
+    || (description != null && (typeof description !== 'string' || description.length > 5000))
+    || (images != null && (!Array.isArray(images) || images.length > 10 || images.some(image => typeof image !== 'string' || image.length > 2000)))
+    || (category != null && (typeof category !== 'string' || category.length > 50))
+    || (city != null && (typeof city !== 'string' || city.length > 50))) return res.status(400).json({ error: 'بيانات المنتج غير صحيحة' });
   try {
     const result = await pool.query(
       `INSERT INTO products (seller_id, name, description, price, images, stock, category, city) 
@@ -58,7 +63,8 @@ router.post('/', checkAuth, async (req, res) => {
     );
     res.json({ success: true, product: result.rows[0] });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Product API operation failed:', error);
+    res.status(500).json({ error: 'تعذر إكمال طلب المنتج حاليًا' });
   }
 });
 
@@ -111,6 +117,7 @@ router.delete('/:productId', checkAuth, async (req, res) => {
   const productId = Number(req.params.productId);
   const userId = req.userId;
   if (!Number.isSafeInteger(productId) || productId < 1) return res.status(400).json({ error: 'رقم المنتج غير صحيح' });
+  if (req.userRole !== 'seller' && req.userRole !== 'admin') return res.status(403).json({ error: 'صلاحية البائع مطلوبة' });
 
   try {
     const productCheck = await pool.query('SELECT seller_id FROM products WHERE id = $1', [productId]);
