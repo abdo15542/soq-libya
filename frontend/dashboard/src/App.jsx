@@ -14,24 +14,29 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('soq_user');
-    if (savedUser) {
-      const parsed = JSON.parse(savedUser);
-      setUser(parsed);
-      // تحديث بيانات المستخدم من الخادم
-      api.get(`/auth/me/${parsed.id}`).then(res => {
-        setUser(res.data);
-        localStorage.setItem('soq_user', JSON.stringify(res.data));
-      }).catch(() => {
+    let active = true;
+    const restoreSession = async () => {
+      try {
+        const session = JSON.parse(localStorage.getItem('soq_session') || 'null');
+        if (!session?.token) throw new Error('NO_SESSION');
+        const response = await api.get('/auth/me');
+        if (!active) return;
+        setUser(response.data);
+        localStorage.setItem('soq_user', JSON.stringify(response.data));
+        localStorage.setItem('soq_session', JSON.stringify({ ...session, user: response.data }));
+      } catch {
         localStorage.removeItem('soq_user');
-        setUser(null);
-      });
-    }
-    setLoading(false);
+        localStorage.removeItem('soq_session');
+        if (active) setUser(null);
+      } finally { if (active) setLoading(false); }
+    };
+    restoreSession();
+    return () => { active = false; };
   }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('soq_user');
+    localStorage.removeItem('soq_session');
     setUser(null);
     window.location.href = '/';
   };
