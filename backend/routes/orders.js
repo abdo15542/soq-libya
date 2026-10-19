@@ -11,12 +11,17 @@ router.post('/', async (req, res) => {
   const customerId = req.userId;
   const productId = Number(req.body.productId);
   const customerAddress = String(req.body.customerAddress || '').trim();
-  const deliveryFee = Number(req.body.deliveryFee ?? 0);
+  // رسوم التوصيل لا تُقبل من العميل؛ تُحدد من إعداد الخادم حتى لا يستطيع التلاعب بالإجمالي.
+  const configuredDeliveryFee = process.env.DELIVERY_FEE_LYD;
+  const deliveryFee = configuredDeliveryFee === undefined ? NaN : Number(configuredDeliveryFee);
 
   if (!Number.isSafeInteger(productId) || productId < 1 ||
-      !customerAddress || customerAddress.length > 1000 ||
-      !Number.isFinite(deliveryFee) || deliveryFee < 0 || deliveryFee > 1000) {
+      !customerAddress || customerAddress.length > 1000) {
     return res.status(400).json({ error: 'بيانات الطلب غير صحيحة' });
+  }
+  if (!Number.isFinite(deliveryFee) || deliveryFee < 0 || deliveryFee > 1000) {
+    console.error('DELIVERY_FEE_LYD must be configured to a number between 0 and 1000');
+    return res.status(503).json({ error: 'خدمة إنشاء الطلبات غير مهيأة للتوصيل حاليًا' });
   }
 
   const client = await pool.connect();
@@ -41,7 +46,6 @@ router.post('/', async (req, res) => {
       return res.status(409).json({ error: 'المنتج غير متوفر حاليًا' });
     }
 
-    // ملاحظة: رسوم التوصيل مؤقتًا قيمة مرسلة من العميل؛ يجب استبدالها بتعرفة مدينة موثوقة قبل الإطلاق.
     const totalAmount = Number((price + deliveryFee).toFixed(2));
     const inserted = await client.query(
       `INSERT INTO orders
