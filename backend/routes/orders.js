@@ -154,6 +154,16 @@ router.put('/:orderId/status', async (req, res) => {
        WHERE id = $2 RETURNING *`,
       [status, orderId]
     );
+
+    // The product stock was reserved when the order was created; release it
+    // exactly once when a permitted cancellation succeeds.
+    if (status === 'cancelled') {
+      const restored = await client.query(
+        'UPDATE products SET stock = stock + 1 WHERE id = $1 RETURNING id',
+        [order.product_id]
+      );
+      if (restored.rowCount !== 1) throw new Error('Could not restore product stock after cancellation');
+    }
     await client.query('COMMIT');
     return res.json({ success: true, order: updated.rows[0] });
   } catch (error) {
