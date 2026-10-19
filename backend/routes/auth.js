@@ -30,7 +30,11 @@ router.post('/google', async (req, res) => {
     );
     const user = result.rows[0];
     return res.json({ success: true, token: issueSession(user), expiresIn: 43200, user: publicUser(user) });
-  } catch (error) { console.error('Google sign-in failed:', error); return res.status(500).json({ error: 'تعذر إكمال تسجيل الدخول حاليًا', code: 'AUTH_SERVER_ERROR' }); }
+  } catch (error) {
+    if (error && error.code === '23505') return res.status(409).json({ error: 'هذا البريد مرتبط بحساب آخر. تواصل مع الدعم لاستعادة الوصول بأمان.', code: 'GOOGLE_EMAIL_ALREADY_LINKED' });
+    console.error('Google sign-in failed:', error);
+    return res.status(500).json({ error: 'تعذر إكمال تسجيل الدخول حاليًا', code: 'AUTH_SERVER_ERROR' });
+  }
 });
 router.get('/me', checkAuth, async (req, res) => {
   try { const result = await pool.query('SELECT id, email, phone, full_name, role, verified, rating FROM users WHERE id = $1', [req.userId]); if (!result.rowCount) return res.status(404).json({ error: 'المستخدم غير موجود' }); return res.json(publicUser(result.rows[0])); }
