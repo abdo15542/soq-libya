@@ -11,7 +11,7 @@ test('accepts supported image data URLs with valid base64', () => {
     ['webp', Buffer.from('RIFF0000WEBP')]
   ];
   for (const [mime, bytes] of samples) {
-    assert.equal(isAllowedImageDataUrl(`data:image/${mime};base64,${bytes.toString('base64')}`), true);
+    assert.equal(isAllowedImageDataUrl(`data:image/${mime};base64,${bytes.toString('base64')}`), true, `valid ${mime} signature should pass`);
   }
   assert.equal(isAllowedImageDataUrl('data:image/png;base64,aGVsbG8='), false);
 });
