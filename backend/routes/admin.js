@@ -88,14 +88,58 @@ router.get('/verification-requests', async (req, res) => {
 router.put('/users/:userId/approve-role', async (req, res) => {
   const userId = Number(req.params.userId);
   if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'معرّف الحساب غير صحيح' });
+
+  let client;
   try {
-    const result = await pool.query(
-      "UPDATE users SET role = requested_role, verified = TRUE, requested_role = NULL WHERE id = $1 AND requested_role IN ('seller', 'driver') AND id_image IS NOT NULL AND selfie_image IS NOT NULL RETURNING id, role, verified",
+    client = await pool.connect();
+    await client.query('BEGIN');
+    // Lock the request so concurrent admin actions cannot approve a stale or changed record.
+    const pending = await client.query(
+      "SELECT id, requested_role, id_image, selfie_image FROM users WHERE id = $1 AND requested_role IN ('seller', 'driver') FOR UPDATE",
       [userId]
     );
-    if (!result.rowCount) return res.status(404).json({ error: 'طلب التوثيق غير موجود أو غير مكتمل' });
-    res.json({ success: true, user: result.rows[0] });
-  } catch (error) { console.error('Role approval failed:', error); res.status(500).json({ error: 'تعذر اعتماد طلب الحساب' }); }
+    if (!pending.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'طلب التوثيق غير موجود أو غير مكتمل' });
+    }
+
+    const record = pending.rows[0];
+    if (!record.id_image || !record.selfie_image) {
+      await client.query('ROLLBACK');
+      return res.status(422).json({ error: 'مستندات التوثيق ناقصة، لا يمكن اعتماد الحساب' });
+    }
+
+    // Presence alone is insufficient: corrupted ciphertext must never be accepted as verified identity.
+    try {
+      const idImage = decryptIdentity(record.id_image);
+      const selfieImage = decryptIdentity(record.selfie_image);
+      if (typeof idImage !== 'string' || !idImage.startsWith('data:image/')
+        || typeof selfieImage !== 'string' || !selfieImage.startsWith('data:image/')) {
+        throw new Error('Identity image payload is not a valid data URL');
+      }
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Identity validation failed during approval for user:', userId, error);
+      return res.status(422).json({ error: 'تعذر التحقق من سلامة مستندات الهوية؛ لم يتم اعتماد الحساب' });
+    }
+
+    const result = await client.query(
+      "UPDATE users SET role = requested_role, verified = TRUE, requested_role = NULL WHERE id = $1 AND requested_role IN ('seller', 'driver') RETURNING id, role, verified",
+      [userId]
+    );
+    if (!result.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'تغير طلب التوثيق أثناء المعالجة؛ أعد المحاولة' });
+    }
+    await client.query('COMMIT');
+    return res.json({ success: true, user: result.rows[0] });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error('Role approval failed:', error);
+    return res.status(500).json({ error: 'تعذر اعتماد طلب الحساب' });
+  } finally {
+    if (client) client.release();
+  }
 });
 
 // النزاعات المفتوحة
