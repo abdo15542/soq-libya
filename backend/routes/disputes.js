@@ -25,7 +25,7 @@ router.post('/', async (req, res) => {
     }
     const existing = await client.query("SELECT id FROM disputes WHERE order_id = $1 AND status = 'open'", [orderId]);
     if (existing.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'يوجد نزاع مفتوح لهذا الطلب بالفعل' }); }
-    const created = await client.query('INSERT INTO disputes (order_id, customer_id, reason) VALUES ($1, $2, $3) RETURNING id, order_id, customer_id, reason, status, created_at', [orderId, req.userId, reason]);
+    const created = await client.query('INSERT INTO disputes (order_id, customer_id, reason, order_status_before_dispute) VALUES ($1, $2, $3, $4) RETURNING id, order_id, customer_id, reason, status, created_at', [orderId, req.userId, reason, order.rows[0].status]);
     await client.query("UPDATE orders SET status = 'disputed' WHERE id = $1", [orderId]);
     await client.query('COMMIT');
     return res.status(201).json({ success: true, dispute: created.rows[0] });
