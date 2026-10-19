@@ -3,6 +3,7 @@ const router = express.Router();
 const { Pool } = require('pg');
 const { checkAuth, checkRole } = require('../middleware/auth');
 const { decryptIdentity } = require('../utils/identity-crypto');
+const { isAllowedImageDataUrl } = require('../utils/identity-validation');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
 // استخدام صلاحية admin فقط
@@ -113,8 +114,7 @@ router.put('/users/:userId/approve-role', async (req, res) => {
     try {
       const idImage = decryptIdentity(record.id_image);
       const selfieImage = decryptIdentity(record.selfie_image);
-      if (typeof idImage !== 'string' || !idImage.startsWith('data:image/')
-        || typeof selfieImage !== 'string' || !selfieImage.startsWith('data:image/')) {
+      if (!isAllowedImageDataUrl(idImage) || !isAllowedImageDataUrl(selfieImage)) {
         throw new Error('Identity image payload is not a valid data URL');
       }
     } catch (error) {
@@ -167,16 +167,48 @@ router.put('/users/:userId/verify', async (req, res) => {
   const { verified } = req.body || {};
   if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'معرّف الحساب غير صحيح' });
   if (typeof verified !== 'boolean') return res.status(400).json({ error: 'قيمة التوثيق غير صحيحة' });
+
+  let client;
   try {
-    const result = await pool.query(
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const selected = await client.query(
+      "SELECT id, role, id_image, selfie_image FROM users WHERE id = $1 AND role IN ('seller', 'driver') FOR UPDATE",
+      [userId]
+    );
+    if (!selected.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'حساب البائع أو المندوب غير موجود' });
+    }
+
+    if (verified) {
+      const user = selected.rows[0];
+      let documentsValid = false;
+      try {
+        documentsValid = Boolean(user.id_image && user.selfie_image
+          && isAllowedImageDataUrl(decryptIdentity(user.id_image))
+          && isAllowedImageDataUrl(decryptIdentity(user.selfie_image)));
+      } catch (error) {
+        console.error('Identity validation failed during manual verification for user:', userId, error);
+      }
+      if (!documentsValid) {
+        await client.query('ROLLBACK');
+        return res.status(422).json({ error: 'لا يمكن توثيق الحساب دون مستندات هوية سليمة' });
+      }
+    }
+
+    const result = await client.query(
       "UPDATE users SET verified = $1 WHERE id = $2 AND role IN ('seller', 'driver') RETURNING id, role, verified",
       [verified, userId]
     );
-    if (!result.rowCount) return res.status(404).json({ error: 'حساب البائع أو المندوب غير موجود' });
-    res.json({ success: true, user: result.rows[0] });
+    await client.query('COMMIT');
+    return res.json({ success: true, user: result.rows[0] });
   } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('User verification update failed:', error);
-    res.status(500).json({ error: 'تعذر تحديث حالة التوثيق' });
+    return res.status(500).json({ error: 'تعذر تحديث حالة التوثيق' });
+  } finally {
+    if (client) client.release();
   }
 });
 
