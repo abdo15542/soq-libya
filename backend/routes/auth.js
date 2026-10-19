@@ -3,6 +3,7 @@ const router = express.Router();
 const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
 const { decrypt } = require('../utils/crypto');
+const { encryptIdentity } = require('../utils/identity-crypto');
 const { checkAuth } = require('../middleware/auth');
 const { isAllowedImageDataUrl } = require('../utils/identity-validation');
 const { Pool } = require('pg');
@@ -52,7 +53,7 @@ router.post('/verify', checkAuth, async (req, res) => {
   try {
     const result = await pool.query(
       'UPDATE users SET id_image = $1, selfie_image = $2, full_name = $3, requested_role = $4, verified = FALSE WHERE id = $5 RETURNING id',
-      [idImage, selfieImage, fullName.trim(), requestedRole, req.userId]
+      [encryptIdentity(idImage), encryptIdentity(selfieImage), fullName.trim(), requestedRole, req.userId]
     );
     if (!result.rowCount) return res.status(404).json({ error: 'الحساب غير موجود' });
     return res.status(202).json({ success: true, pendingReview: true, message: 'تم استلام طلب التوثيق وهو بانتظار مراجعة الإدارة' });
