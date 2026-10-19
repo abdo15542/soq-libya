@@ -31,9 +31,11 @@ router.get('/me', checkAuth, async (req, res) => {
   catch (error) { console.error('Profile lookup failed:', error); return res.status(500).json({ error: 'تعذر جلب بيانات الحساب حاليًا' }); }
 });
 router.post('/verify', checkAuth, async (req, res) => {
-  const { idImage, selfieImage, fullName } = req.body || {};
+  const { idImage, selfieImage, fullName, requestedRole } = req.body || {};
+  const allowedRequestedRoles = ['customer', 'seller', 'driver'];
+  if (!allowedRequestedRoles.includes(requestedRole)) return res.status(400).json({ error: 'نوع الحساب المطلوب غير صحيح' });
   if (typeof fullName !== 'string' || fullName.trim().length < 2 || fullName.trim().length > 100 || typeof idImage !== 'string' || idImage.length < 20 || idImage.length > 5000000 || typeof selfieImage !== 'string' || selfieImage.length < 20 || selfieImage.length > 5000000) return res.status(400).json({ error: 'بيانات التوثيق غير مكتملة أو غير صحيحة' });
-  try { const result = await pool.query('UPDATE users SET id_image = $1, selfie_image = $2, full_name = $3, verified = FALSE WHERE id = $4 RETURNING id', [idImage, selfieImage, fullName.trim(), req.userId]); if (!result.rowCount) return res.status(404).json({ error: 'الحساب غير موجود' }); return res.status(202).json({ success: true, pendingReview: true, message: 'تم استلام طلب التوثيق وهو بانتظار مراجعة الإدارة' }); }
+  try { const result = await pool.query('UPDATE users SET id_image = $1, selfie_image = $2, full_name = $3, requested_role = $4, verified = FALSE WHERE id = $5 RETURNING id', [idImage, selfieImage, fullName.trim(), requestedRole, req.userId]); if (!result.rowCount) return res.status(404).json({ error: 'الحساب غير موجود' }); return res.status(202).json({ success: true, pendingReview: true, message: 'تم استلام طلب التوثيق وهو بانتظار مراجعة الإدارة' }); }
   catch (error) { console.error('Verification submission failed:', error); return res.status(500).json({ error: 'تعذر حفظ طلب التوثيق حاليًا' }); }
 });
 module.exports = router;
