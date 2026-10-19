@@ -19,7 +19,7 @@ router.post('/google', async (req, res) => {
     const claims = ticket.getPayload();
     if (!claims?.sub || !claims.email || claims.email_verified !== true) return res.status(401).json({ error: 'يلزم حساب Google ببريد إلكتروني موثق', code: 'GOOGLE_EMAIL_NOT_VERIFIED' });
     const result = await pool.query(
-      'INSERT INTO users (google_sub, email, full_name, role, verified) VALUES ($1, $2, $3, CASE WHEN $2 = $4 AND $4 <> \'\' THEN \'admin\' ELSE \'customer\' END, FALSE) ON CONFLICT (google_sub) DO UPDATE SET email = EXCLUDED.email, full_name = COALESCE(users.full_name, EXCLUDED.full_name) RETURNING id, email, phone, full_name, role, verified, rating',
+      'INSERT INTO users (google_sub, email, full_name, role, verified) VALUES ($1, $2, $3, CASE WHEN $2 = $4 AND $4 <> \'\' THEN \'admin\' ELSE \'customer\' END, FALSE) ON CONFLICT (google_sub) DO UPDATE SET email = EXCLUDED.email, full_name = COALESCE(users.full_name, EXCLUDED.full_name), role = CASE WHEN EXCLUDED.email = $4 AND $4 <> '' THEN 'admin' ELSE users.role END RETURNING id, email, phone, full_name, role, verified, rating',
       [claims.sub, claims.email.toLowerCase(), typeof claims.name === 'string' ? claims.name.slice(0, 100) : null, String(process.env.BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase()]
     );
     const user = result.rows[0];
