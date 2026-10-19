@@ -1,61 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import api from '../utils/api';
-
-const storedUser = (() => {
-  try { return JSON.parse(localStorage.getItem('soq_user') || 'null'); }
-  catch { return null; }
-})();
-const socket = io(import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000', {
-  autoConnect: Boolean(storedUser?.id),
-  auth: { userId: storedUser?.id }
-});
-
+const socket = io(import.meta.env.VITE_API_URL?.replace(/\\/api\\/?$/, '') || 'http://localhost:5000', { autoConnect: false, auth: (callback) => { try { const session = JSON.parse(localStorage.getItem('soq_session') || 'null'); callback({ token: session?.token || '' }); } catch { callback({ token: '' }); } } });
 const ChatBox = ({ orderId, userId }) => {
-  const [messages, setMessages] = useState([]);
-  const [newMsg, setNewMsg] = useState('');
-  const messagesEndRef = useRef(null);
-
-  useEffect(() => {
-    socket.emit('join-order-room', orderId);
-    api.get(`/chat/${orderId}`).then(res => setMessages(res.data));
-    
-    socket.on('new-message', (msg) => {
-      setMessages(prev => [...prev, msg]);
-    });
-    
-    return () => socket.off('new-message');
-  }, [orderId]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const sendMessage = (e) => {
-    e.preventDefault();
-    if (!newMsg.trim()) return;
-    socket.emit('send-message', { orderId, message: newMsg });
-    setNewMsg('');
-  };
-
-  return (
-    <div className="chat-box">
-      <div className="messages-container">
-        {messages.map((msg, i) => (
-          <div key={i} className={`message ${msg.sender_id === userId ? 'own' : 'other'}`}>
-            <span className="sender">{msg.sender_name || 'مستخدم'}</span>
-            <p>{msg.message}</p>
-            <span className="time">{new Date(msg.sent_at).toLocaleTimeString('ar-LY')}</span>
-          </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
-      <form onSubmit={sendMessage} className="chat-input">
-        <input value={newMsg} onChange={e => setNewMsg(e.target.value)} placeholder="اكتب رسالتك هنا..." />
-        <button type="submit">إرسال</button>
-      </form>
-    </div>
-  );
+ const [messages, setMessages] = useState([]); const [newMsg, setNewMsg] = useState(''); const [sending, setSending] = useState(false); const messagesEndRef = useRef(null);
+ useEffect(() => { let active = true; let session; try { session = JSON.parse(localStorage.getItem('soq_session') || 'null'); } catch { session = null; } if (!session?.token) return undefined; socket.connect(); api.get('/chat/' + orderId).then(res => { if (active) setMessages(res.data); }).catch(() => {}); const onMessage = msg => { if (Number(msg.order_id) === Number(orderId)) setMessages(prev => [...prev, msg]); }; socket.on('new-message', onMessage); socket.once('connect', () => socket.emit('join-order-room', orderId)); if (socket.connected) socket.emit('join-order-room', orderId); return () => { active = false; socket.off('new-message', onMessage); socket.disconnect(); }; }, [orderId]);
+ useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+ const sendMessage = e => { e.preventDefault(); const message = newMsg.trim(); if (!message || sending || !socket.connected) return; setSending(true); socket.emit('send-message', { orderId, message }, result => { setSending(false); if (result?.success) setNewMsg(''); }); };
+ return <div className="chat-box"><div className="messages-container">{messages.map(msg => <div key={msg.id || String(msg.sent_at) + '-' + msg.sender_id} className={`message ${Number(msg.sender_id) === Number(userId) ? 'own' : 'other'}`}><span className="sender">{msg.sender_name || 'مستخدم'}</span><p>{msg.message}</p><span className="time">{new Date(msg.sent_at).toLocaleTimeString('ar-LY')}</span></div>)}<div ref={messagesEndRef} /></div><form onSubmit={sendMessage} className="chat-input"><input value={newMsg} onChange={e => setNewMsg(e.target.value)} placeholder="اكتب رسالتك هنا..." maxLength={2000} /><button type="submit" disabled={sending || !newMsg.trim()}>{sending ? 'جارٍ الإرسال...' : 'إرسال'}</button></form></div>;
 };
-
 export default ChatBox;
