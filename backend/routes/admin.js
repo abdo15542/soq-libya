@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg');
 const { checkAuth, checkRole } = require('../middleware/auth');
+const { decryptIdentity } = require('../utils/identity-crypto');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 
 // استخدام صلاحية admin فقط
@@ -71,7 +72,16 @@ router.get('/verification-requests', async (req, res) => {
     const result = await pool.query(
       "SELECT id, email, full_name, requested_role, verified, id_image, selfie_image, created_at FROM users WHERE requested_role IN ('seller', 'driver') AND id_image IS NOT NULL AND selfie_image IS NOT NULL ORDER BY created_at ASC"
     );
-    res.json(result.rows);
+    const requests = result.rows.map(row => {
+      try {
+        return { ...row, id_image: decryptIdentity(row.id_image), selfie_image: decryptIdentity(row.selfie_image) };
+      } catch (error) {
+        console.error('Identity document decryption failed for user:', row.id, error);
+        return { ...row, id_image: null, selfie_image: null, document_error: true };
+      }
+    });
+    res.set('Cache-Control', 'no-store, private');
+    res.json(requests);
   } catch (error) { console.error('Verification request listing failed:', error); res.status(500).json({ error: 'تعذر جلب طلبات التوثيق' }); }
 });
 
