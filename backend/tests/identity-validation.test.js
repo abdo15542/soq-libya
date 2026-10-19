@@ -5,8 +5,8 @@ const { isAllowedImageDataUrl, MAX_IMAGE_DATA_URL_LENGTH } = require('../utils/i
 test('accepts JPEG, PNG, and WebP data URLs with matching signatures', () => {
   assert.equal(isAllowedImageDataUrl('data:image/jpeg;base64,/9j/AA=='), true);
   assert.equal(isAllowedImageDataUrl('data:image/png;base64,iVBORw0KGgo='), true);
-  // RIFF + four bytes + WEBP signature; the validator checks the container signature.
-  assert.equal(isAllowedImageDataUrl('data:image/webp;base64,UklGRgAAAABXRUJQ'), true);
+  // RIFF + four-byte size + WEBP signature; the validator checks the container signature.
+  assert.equal(isAllowedImageDataUrl('data:image/webp;base64,UklGRgAAAAAAV0VCUA=='), true);
 });
 
 test('rejects unsupported MIME types and MIME/signature mismatches', () => {
