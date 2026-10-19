@@ -4,6 +4,7 @@ const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
 const { decrypt } = require('../utils/crypto');
 const { checkAuth } = require('../middleware/auth');
+const { isAllowedImageDataUrl } = require('../utils/identity-validation');
 const { Pool } = require('pg');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
 const googleClient = new OAuth2Client();
@@ -40,10 +41,6 @@ router.get('/me', checkAuth, async (req, res) => {
   try { const result = await pool.query('SELECT id, email, phone, full_name, role, verified, rating FROM users WHERE id = $1', [req.userId]); if (!result.rowCount) return res.status(404).json({ error: 'المستخدم غير موجود' }); return res.json(publicUser(result.rows[0])); }
   catch (error) { console.error('Profile lookup failed:', error); return res.status(500).json({ error: 'تعذر جلب بيانات الحساب حاليًا' }); }
 });
-const isAllowedImageDataUrl = (value) => typeof value === 'string'
-  && value.length <= 5000000
-  && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value);
-
 router.post('/verify', checkAuth, async (req, res) => {
   const { idImage, selfieImage, fullName, requestedRole } = req.body || {};
   const allowedRequestedRoles = ['seller', 'driver'];
