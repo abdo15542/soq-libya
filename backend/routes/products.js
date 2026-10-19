@@ -108,7 +108,8 @@ router.put('/:productId', checkAuth, async (req, res) => {
     );
     return res.json({ success: true, product: updated.rows[0] });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Seller products lookup failed:', error);
+    res.status(500).json({ error: 'تعذر جلب منتجات البائع حاليًا' });
   }
 });
 
@@ -133,10 +134,14 @@ router.delete('/:productId', checkAuth, async (req, res) => {
 
 // منتجات بائع معين
 router.get('/seller/:sellerId', async (req, res) => {
+  const sellerId = Number(req.params.sellerId);
+  if (!Number.isSafeInteger(sellerId) || sellerId < 1) {
+    return res.status(400).json({ error: 'رقم البائع غير صحيح' });
+  }
   try {
     const result = await pool.query(
-      'SELECT * FROM products WHERE seller_id = $1 ORDER BY created_at DESC',
-      [req.params.sellerId]
+      'SELECT * FROM products WHERE seller_id = $1 AND stock > 0 ORDER BY created_at DESC',
+      [sellerId]
     );
     res.json(result.rows);
   } catch (error) {
