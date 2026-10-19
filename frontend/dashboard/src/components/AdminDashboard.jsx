@@ -94,8 +94,8 @@ const AdminDashboard = () => {
         <section>
           <h3>طلبات اعتماد البائعين والمندوبين</h3>
           {verificationRequests.length === 0 ? <p>لا توجد طلبات معلقة حاليًا.</p> : (
-            <table><thead><tr><th>الاسم</th><th>البريد</th><th>نوع الطلب</th><th>الإجراء</th></tr></thead><tbody>
-              {verificationRequests.map(request => <tr key={request.id}><td>{request.full_name || 'بدون اسم'}</td><td>{request.email || '—'}</td><td>{request.requested_role === 'seller' ? 'بائع' : 'مندوب توصيل'}</td><td><button onClick={() => handleApproveRole(request.id)}>اعتماد بعد مراجعة الوثائق</button></td></tr>)}
+            <table><thead><tr><th>الاسم</th><th>البريد</th><th>نوع الطلب</th><th>الوثائق</th><th>الإجراء</th></tr></thead><tbody>
+              {verificationRequests.map(request => <tr key={request.id}><td>{request.full_name || 'بدون اسم'}</td><td>{request.email || '—'}</td><td>{request.requested_role === 'seller' ? 'بائع' : 'مندوب توصيل'}</td><td><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><a href={request.id_image} target='_blank' rel='noreferrer'>عرض الوثيقة</a><a href={request.selfie_image} target='_blank' rel='noreferrer'>عرض السيلفي</a></div></td><td><button onClick={() => handleApproveRole(request.id)}>اعتماد بعد مراجعة الوثائق</button></td></tr>)}
             </tbody></table>
           )}
         </section>
