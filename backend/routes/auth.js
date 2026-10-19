@@ -1,120 +1,39 @@
 const express = require('express');
 const router = express.Router();
-const { body, validationResult } = require('express-validator');
-const { Pool } = require('pg');
-const { encrypt, decrypt } = require('../utils/crypto');
+const { OAuth2Client } = require('google-auth-library');
+const jwt = require('jsonwebtoken');
+const { decrypt } = require('../utils/crypto');
 const { checkAuth } = require('../middleware/auth');
+const { Pool } = require('pg');
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
-
-// تسجيل/دخول برقم الهاتف
-// توحيد رقم الهاتف الليبي قبل التحقق والتخزين
-const normalizeLibyanPhone = (value) => {
-  let phone = String(value || '').replace(/[\s().-]/g, '');
-  if (phone.startsWith('+218')) phone = '0' + phone.slice(4);
-  else if (phone.startsWith('218')) phone = '0' + phone.slice(3);
-  return phone;
-};
-
-router.post('/phone', async (req, res) => {
-  const phone = normalizeLibyanPhone(req.body.phone);
-  // أرقام المحمول الليبية المحلية: 09xxxxxxxx أو 091/092/094/095/096/.... ضمن 10 أرقام
-  if (!/^09\d{8}$/.test(phone)) {
-    return res.status(400).json({ error: 'أدخل رقم هاتف ليبي صحيحًا مثل 0912345678', code: 'INVALID_PHONE' });
-  }
-
+const googleClient = new OAuth2Client();
+function publicUser(user) { let phone = null; if (user.phone) { try { phone = decrypt(user.phone); } catch { phone = null; } } return { id: Number(user.id), email: user.email || null, full_name: user.full_name || null, phone, role: user.role || 'customer', verified: Boolean(user.verified), rating: user.rating }; }
+function issueSession(user) { if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) throw new Error('JWT_SECRET must contain at least 32 characters'); return jwt.sign({ sub: String(user.id), typ: 'access' }, process.env.JWT_SECRET, { algorithm: 'HS256', expiresIn: '12h', issuer: 'soq-libya-api', audience: 'soq-libya-client' }); }
+router.post('/google', async (req, res) => {
+  const credential = typeof req.body?.credential === 'string' ? req.body.credential : '';
+  if (!credential || credential.length > 10000) return res.status(400).json({ error: 'تعذر قراءة بيانات تسجيل Google', code: 'INVALID_CREDENTIAL' });
+  if (!process.env.GOOGLE_CLIENT_ID) return res.status(503).json({ error: 'تسجيل Google غير مهيأ على الخادم', code: 'GOOGLE_AUTH_NOT_CONFIGURED' });
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) return res.status(503).json({ error: 'جلسات الدخول غير مهيأة بأمان على الخادم', code: 'SESSION_NOT_CONFIGURED' });
   try {
-    // التشفير يستخدم IV عشوائيًا، لذلك لا يمكن البحث بمقارنة النص المشفر.
-    // نفك تشفير الأرقام الموجودة ونقارن الرقم الموحّد لتفادي إنشاء حساب جديد في كل محاولة.
-    const existing = await pool.query('SELECT * FROM users ORDER BY id ASC');
-    let user = null;
-    for (const row of existing.rows) {
-      try {
-        if (normalizeLibyanPhone(decrypt(row.phone)) === phone) {
-          user = row;
-          break;
-        }
-      } catch (decryptError) {
-        // تجاهل السجل غير القابل لفك التشفير؛ لا نعرض بياناته للعميل.
-      }
-    }
-
-    if (!user) {
-      const inserted = await pool.query(
-        'INSERT INTO users (phone, role, verified) VALUES ($1, $2, FALSE) RETURNING *',
-        [encrypt(phone), 'customer']
-      );
-      user = inserted.rows[0];
-    }
-
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        phone,
-        full_name: user.full_name,
-        role: user.role || 'customer',
-        verified: Boolean(user.verified),
-        rating: user.rating
-      }
-    });
-  } catch (error) {
-    console.error('Phone sign-in failed:', error);
-    res.status(500).json({ error: 'تعذر إكمال تسجيل الدخول حاليًا', code: 'AUTH_SERVER_ERROR' });
-  }
-});
-
-// استلام طلب التوثيق: لا يُعتبر الحساب موثقًا تلقائيًا عند رفع الصور.
-// يلزم فحص الوثائق واعتمادها من الإدارة قبل تفعيل صلاحيات البيع أو التوصيل.
-router.post('/verify', checkAuth, async (req, res) => {
-  const { userId, idImage, selfieImage, fullName, role } = req.body;
-  const id = Number(userId);
-  const allowedRoles = ['customer', 'seller', 'driver'];
-  if (id !== Number(req.userId)) return res.status(403).json({ error: 'لا يمكنك إرسال وثائق لحساب آخر' });
-  if (!Number.isSafeInteger(id) || id < 1 ||
-      typeof fullName !== 'string' || fullName.trim().length < 2 || fullName.trim().length > 100 ||
-      typeof idImage !== 'string' || idImage.length < 20 || idImage.length > 5_000_000 ||
-      typeof selfieImage !== 'string' || selfieImage.length < 20 || selfieImage.length > 5_000_000 ||
-      !allowedRoles.includes(role)) {
-    return res.status(400).json({ error: 'بيانات التوثيق غير مكتملة أو غير صحيحة' });
-  }
-
-  try {
-    const existing = await pool.query('SELECT id, verified FROM users WHERE id = $1', [id]);
-    if (!existing.rowCount) return res.status(404).json({ error: 'الحساب غير موجود' });
-
-    // Store the requested role only as a pending request would require a separate schema;
-    // therefore only customer role is kept until admin approval.
-    await pool.query(
-      'UPDATE users SET id_image = $1, selfie_image = $2, full_name = $3, role = $4, verified = FALSE WHERE id = $5',
-      [idImage, selfieImage, fullName.trim(), 'customer', id]
+    const ticket = await googleClient.verifyIdToken({ idToken: credential, audience: process.env.GOOGLE_CLIENT_ID });
+    const claims = ticket.getPayload();
+    if (!claims?.sub || !claims.email || claims.email_verified !== true) return res.status(401).json({ error: 'يلزم حساب Google ببريد إلكتروني موثق', code: 'GOOGLE_EMAIL_NOT_VERIFIED' });
+    const result = await pool.query(
+      'INSERT INTO users (google_sub, email, full_name, role, verified) VALUES ($1, $2, $3, \'customer\', FALSE) ON CONFLICT (google_sub) DO UPDATE SET email = EXCLUDED.email, full_name = COALESCE(users.full_name, EXCLUDED.full_name) RETURNING id, email, phone, full_name, role, verified, rating',
+      [claims.sub, claims.email.toLowerCase(), typeof claims.name === 'string' ? claims.name.slice(0, 100) : null]
     );
-    return res.status(202).json({
-      success: true,
-      pendingReview: true,
-      message: 'تم استلام طلب التوثيق وهو بانتظار مراجعة الإدارة'
-    });
-  } catch (error) {
-    console.error('Verification submission failed:', error);
-    return res.status(500).json({ error: 'تعذر حفظ طلب التوثيق حاليًا' });
-  }
-});
-
-// جلب بيانات المستخدم
-router.get('/me/:userId', checkAuth, async (req, res) => {
-  if (Number(req.params.userId) !== Number(req.userId) && req.userRole !== 'admin') {
-    return res.status(403).json({ error: 'غير مصرح بعرض بيانات هذا الحساب' });
-  }
-  try {
-    const result = await pool.query('SELECT id, phone, full_name, role, verified, rating FROM users WHERE id = $1', [req.params.userId]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'المستخدم غير موجود' });
     const user = result.rows[0];
-    user.phone = decrypt(user.phone);
-    res.json(user);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+    return res.json({ success: true, token: issueSession(user), expiresIn: 43200, user: publicUser(user) });
+  } catch (error) { console.error('Google sign-in failed:', error); return res.status(500).json({ error: 'تعذر إكمال تسجيل الدخول حاليًا', code: 'AUTH_SERVER_ERROR' }); }
 });
-
-// لا يوجد endpoint عام لتغيير الدور؛ التغيير الإداري يجب أن يمر عبر مسار إدارة محمي.
-
+router.get('/me', checkAuth, async (req, res) => {
+  try { const result = await pool.query('SELECT id, email, phone, full_name, role, verified, rating FROM users WHERE id = $1', [req.userId]); if (!result.rowCount) return res.status(404).json({ error: 'المستخدم غير موجود' }); return res.json(publicUser(result.rows[0])); }
+  catch (error) { console.error('Profile lookup failed:', error); return res.status(500).json({ error: 'تعذر جلب بيانات الحساب حاليًا' }); }
+});
+router.post('/verify', checkAuth, async (req, res) => {
+  const { idImage, selfieImage, fullName } = req.body || {};
+  if (typeof fullName !== 'string' || fullName.trim().length < 2 || fullName.trim().length > 100 || typeof idImage !== 'string' || idImage.length < 20 || idImage.length > 5000000 || typeof selfieImage !== 'string' || selfieImage.length < 20 || selfieImage.length > 5000000) return res.status(400).json({ error: 'بيانات التوثيق غير مكتملة أو غير صحيحة' });
+  try { const result = await pool.query('UPDATE users SET id_image = $1, selfie_image = $2, full_name = $3, verified = FALSE WHERE id = $4 RETURNING id', [idImage, selfieImage, fullName.trim(), req.userId]); if (!result.rowCount) return res.status(404).json({ error: 'الحساب غير موجود' }); return res.status(202).json({ success: true, pendingReview: true, message: 'تم استلام طلب التوثيق وهو بانتظار مراجعة الإدارة' }); }
+  catch (error) { console.error('Verification submission failed:', error); return res.status(500).json({ error: 'تعذر حفظ طلب التوثيق حاليًا' }); }
+});
 module.exports = router;
