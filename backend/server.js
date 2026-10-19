@@ -6,23 +6,20 @@ const { Pool } = require('pg');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cron = require('node-cron');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
-});
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173').split(',').map(value => value.trim()).filter(Boolean);
+const io = new Server(server, { cors: { origin: allowedOrigins, methods: ['GET', 'POST'] } });
 
 // Middleware
 app.use(helmet({
   contentSecurityPolicy: false, // لتجنب مشاكل CSP مع Leaflet
   crossOriginEmbedderPolicy: false
 }));
-app.use(cors());
+app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.includes(origin)) return callback(null, true); return callback(new Error('Origin not allowed by CORS')); } }));
 app.use(express.json({ limit: '10mb' }));
 
 // Rate limiting
@@ -45,7 +42,9 @@ const createTables = async () => {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
-        phone VARCHAR(20) UNIQUE NOT NULL,
+        phone VARCHAR(255) UNIQUE,
+        google_sub VARCHAR(255) UNIQUE,
+        email VARCHAR(320),
         full_name VARCHAR(100),
         id_image TEXT,
         selfie_image TEXT,
@@ -135,32 +134,33 @@ const createTables = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log('✅ تم إنشاء الجداول بنجاح');
+    await pool.query('ALTER TABLE users ALTER COLUMN phone DROP NOT NULL');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub VARCHAR(255)');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(320)');
+    await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub_unique ON users (google_sub) WHERE google_sub IS NOT NULL');
+    await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (LOWER(email)) WHERE email IS NOT NULL');
+    console.log('✅ تم إنشاء الجداول وتهيئة حقول الهوية');
   } catch (err) {
     console.error('❌ خطأ في إنشاء الجداول:', err);
     throw err;
   }
 };
 
-// Socket.IO chat access control. The current client identity is transitional:
-// x-user-id is not cryptographic proof and must be replaced by a verified session/JWT
-// before public launch. Still enforce order participation and never trust senderId.
+// Socket.IO authenticates with the same signed session as REST APIs.
 io.use(async (socket, next) => {
-  const rawUserId = socket.handshake.auth && socket.handshake.auth.userId;
-  const userId = Number(rawUserId);
-  if (!Number.isSafeInteger(userId) || userId < 1) {
-    return next(new Error('UNAUTHORIZED'));
-  }
+  const token = socket.handshake.auth && socket.handshake.auth.token;
+  if (typeof token !== 'string' || !token || !process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) return next(new Error('UNAUTHORIZED'));
+  let claims;
+  try { claims = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'], issuer: 'soq-libya-api', audience: 'soq-libya-client' }); } catch { return next(new Error('UNAUTHORIZED')); }
+  const userId = Number(claims.sub);
+  if (claims.typ !== 'access' || !Number.isSafeInteger(userId) || userId < 1) return next(new Error('UNAUTHORIZED'));
   try {
     const user = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
     if (!user.rowCount) return next(new Error('UNAUTHORIZED'));
     socket.data.userId = Number(user.rows[0].id);
     socket.data.userRole = user.rows[0].role || 'customer';
     return next();
-  } catch (error) {
-    console.error('Socket authentication failed:', error);
-    return next(new Error('AUTH_UNAVAILABLE'));
-  }
+  } catch (error) { console.error('Socket authentication failed:', error); return next(new Error('AUTH_UNAVAILABLE')); }
 });
 
 const canAccessOrder = async (userId, userRole, orderId) => {
