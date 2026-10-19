@@ -161,7 +161,7 @@ router.put('/disputes/:disputeId/resolve', async (req, res) => {
     await client.query('COMMIT');
     return res.json({ success: true });
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Dispute resolution failed:', error);
     return res.status(500).json({ error: 'تعذر معالجة النزاع' });
   } finally {
