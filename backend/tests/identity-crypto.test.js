@@ -27,3 +27,19 @@ test('tampered ciphertext is rejected', () => {
   const tampered = encrypted.slice(0, -2) + 'xx';
   assert.throws(() => decryptIdentity(tampered));
 });
+
+test('malformed encrypted identity records are rejected', () => {
+  assert.throws(() => decryptIdentity(PREFIX + 'not-a-valid-record'));
+});
+
+test('encryption fails closed when the server key is missing or too short', () => {
+  const original = process.env.ENCRYPTION_KEY;
+  try {
+    delete process.env.ENCRYPTION_KEY;
+    assert.throws(() => encryptIdentity('private-document'), /ENCRYPTION_KEY/);
+    process.env.ENCRYPTION_KEY = 'too-short';
+    assert.throws(() => encryptIdentity('private-document'), /ENCRYPTION_KEY/);
+  } finally {
+    process.env.ENCRYPTION_KEY = original;
+  }
+});
