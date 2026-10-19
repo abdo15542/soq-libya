@@ -16,25 +16,29 @@ router.get('/', async (req, res) => {
     `);
     res.json(result.rows);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Product query failed:', error);
+    res.status(500).json({ error: 'تعذر إكمال طلب المنتجات حاليًا' });
   }
 });
 
 // الحصول على منتج واحد
 router.get('/:productId', async (req, res) => {
+  const productId = Number(req.params.productId);
+  if (!Number.isSafeInteger(productId) || productId < 1) return res.status(400).json({ error: 'رقم المنتج غير صحيح' });
   try {
     const result = await pool.query(`
       SELECT p.*, u.full_name as seller_name, u.rating as seller_rating, u.id as seller_id
       FROM products p 
       JOIN users u ON p.seller_id = u.id 
       WHERE p.id = $1
-    `, [req.params.productId]);
+    `, [productId]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'المنتج غير موجود' });
     }
     res.json(result.rows[0]);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Product operation failed:', error);
+    res.status(500).json({ error: 'تعذر إكمال طلب المنتج حاليًا' });
   }
 });
 
@@ -61,8 +65,9 @@ router.post('/', checkAuth, async (req, res) => {
 // تحديث منتج
 router.put('/:productId', checkAuth, async (req, res) => {
   const { name, description, price, images, stock, category, city } = req.body;
-  const productId = req.params.productId;
+  const productId = Number(req.params.productId);
   const userId = req.userId;
+  if (!Number.isSafeInteger(productId) || productId < 1) return res.status(400).json({ error: 'رقم المنتج غير صحيح' });
   if (req.userRole !== 'seller' && req.userRole !== 'admin') return res.status(403).json({ error: 'صلاحية البائع مطلوبة' });
 
   try {
@@ -103,8 +108,9 @@ router.put('/:productId', checkAuth, async (req, res) => {
 
 // حذف منتج (إخفاء)
 router.delete('/:productId', checkAuth, async (req, res) => {
-  const productId = req.params.productId;
+  const productId = Number(req.params.productId);
   const userId = req.userId;
+  if (!Number.isSafeInteger(productId) || productId < 1) return res.status(400).json({ error: 'رقم المنتج غير صحيح' });
 
   try {
     const productCheck = await pool.query('SELECT seller_id FROM products WHERE id = $1', [productId]);
