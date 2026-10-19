@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import io from 'socket.io-client';
 import api from '../utils/api';
-const socket = io(import.meta.env.VITE_API_URL?.replace(/\\/api\\/?$/, '') || 'http://localhost:5000', { autoConnect: false, auth: (callback) => { try { const session = JSON.parse(localStorage.getItem('soq_session') || 'null'); callback({ token: session?.token || '' }); } catch { callback({ token: '' }); } } });
+const socket = io(import.meta.env.VITE_API_URL?.split('/api')[0] || 'http://localhost:5000', { autoConnect: false, auth: (callback) => { try { const session = JSON.parse(localStorage.getItem('soq_session') || 'null'); callback({ token: session?.token || '' }); } catch { callback({ token: '' }); } } });
 const ChatBox = ({ orderId, userId }) => {
  const [messages, setMessages] = useState([]); const [newMsg, setNewMsg] = useState(''); const [sending, setSending] = useState(false); const messagesEndRef = useRef(null);
  useEffect(() => { let active = true; let session; try { session = JSON.parse(localStorage.getItem('soq_session') || 'null'); } catch { session = null; } if (!session?.token) return undefined; socket.connect(); api.get('/chat/' + orderId).then(res => { if (active) setMessages(res.data); }).catch(() => {}); const onMessage = msg => { if (Number(msg.order_id) === Number(orderId)) setMessages(prev => [...prev, msg]); }; socket.on('new-message', onMessage); socket.once('connect', () => socket.emit('join-order-room', orderId)); if (socket.connected) socket.emit('join-order-room', orderId); return () => { active = false; socket.off('new-message', onMessage); socket.disconnect(); }; }, [orderId]);
