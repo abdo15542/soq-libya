@@ -133,7 +133,7 @@ router.put('/disputes/:disputeId/resolve', async (req, res) => {
   try {
     await client.query('BEGIN');
     const dispute = await client.query(
-      "SELECT id, order_id FROM disputes WHERE id = $1 AND status = 'open' FOR UPDATE",
+      "SELECT id, order_id, order_status_before_dispute FROM disputes WHERE id = $1 AND status = 'open' FOR UPDATE",
       [disputeId]
     );
     if (!dispute.rowCount) {
@@ -150,7 +150,8 @@ router.put('/disputes/:disputeId/resolve', async (req, res) => {
       await client.query("UPDATE orders SET status = 'refunded' WHERE id = $1", [orderId]);
     } else {
       // Keep the order out of the disputed state after a dismissed dispute.
-      await client.query("UPDATE orders SET status = 'delivered' WHERE id = $1 AND status = 'disputed'", [orderId]);
+      const previousStatus = dispute.rows[0].order_status_before_dispute;
+      if (previousStatus) await client.query('UPDATE orders SET status = $1 WHERE id = $2 AND status = $3', [previousStatus, orderId, 'disputed']);
     }
     await client.query('COMMIT');
     return res.json({ success: true });
