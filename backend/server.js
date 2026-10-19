@@ -29,6 +29,7 @@ const limiter = rateLimit({
   message: 'طلبات كثيرة جداً، حاول مرة أخرى لاحقاً.'
 });
 app.use('/api/auth/google', rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'محاولات تسجيل كثيرة. انتظر قليلًا ثم حاول مجددًا.' } }));
+app.use('/api/auth/verify', rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'تجاوزت عدد طلبات التوثيق المسموح. حاول بعد ساعة.' } }));
 app.use('/api/', limiter);
 
 // قاعدة البيانات
