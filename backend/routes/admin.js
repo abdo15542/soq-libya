@@ -66,7 +66,7 @@ router.get('/drivers', async (req, res) => {
 router.get('/verification-requests', async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, email, full_name, requested_role, verified, created_at FROM users WHERE requested_role IN ('seller', 'driver') AND id_image IS NOT NULL AND selfie_image IS NOT NULL ORDER BY created_at ASC"
+      "SELECT id, email, full_name, requested_role, verified, id_image, selfie_image, created_at FROM users WHERE requested_role IN ('seller', 'driver') AND id_image IS NOT NULL AND selfie_image IS NOT NULL ORDER BY created_at ASC"
     );
     res.json(result.rows);
   } catch (error) { console.error('Verification request listing failed:', error); res.status(500).json({ error: 'تعذر جلب طلبات التوثيق' }); }
