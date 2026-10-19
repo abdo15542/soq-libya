@@ -135,6 +135,9 @@ const createTables = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS id_image TEXT');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS selfie_image TEXT');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(100)');
     await pool.query('ALTER TABLE users ALTER COLUMN phone TYPE VARCHAR(255)');
     await pool.query('ALTER TABLE users ALTER COLUMN phone DROP NOT NULL');
     await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS requested_role VARCHAR(20) CHECK (requested_role IN ('customer', 'seller', 'driver'))");
