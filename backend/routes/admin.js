@@ -24,7 +24,8 @@ router.get('/stats', async (req, res) => {
       activeUsers: parseInt(activeUsers.rows[0].count) || 0
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Admin stats query failed:', error);
+    res.status(500).json({ error: 'تعذر جلب الإحصائيات' });
   }
 });
 
@@ -41,7 +42,8 @@ router.get('/sellers', async (req, res) => {
     `);
     res.json(result.rows);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Admin seller listing failed:', error);
+    res.status(500).json({ error: 'تعذر جلب قائمة البائعين' });
   }
 });
 
@@ -58,7 +60,8 @@ router.get('/drivers', async (req, res) => {
     `);
     res.json(result.rows);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Admin driver listing failed:', error);
+    res.status(500).json({ error: 'تعذر جلب قائمة المندوبين' });
   }
 });
 
@@ -99,7 +102,8 @@ router.get('/disputes', async (req, res) => {
     `);
     res.json(result.rows);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Admin dispute listing failed:', error);
+    res.status(500).json({ error: 'تعذر جلب النزاعات' });
   }
 });
 
@@ -129,8 +133,9 @@ router.put('/disputes/:disputeId/resolve', async (req, res) => {
   if (!Number.isSafeInteger(disputeId) || disputeId < 1) return res.status(400).json({ error: 'معرّف النزاع غير صحيح' });
   if (!['refund', 'dismiss'].includes(resolution)) return res.status(400).json({ error: 'قرار النزاع غير صحيح' });
 
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const dispute = await client.query(
       "SELECT id, order_id, order_status_before_dispute FROM disputes WHERE id = $1 AND status = 'open' FOR UPDATE",
@@ -160,7 +165,7 @@ router.put('/disputes/:disputeId/resolve', async (req, res) => {
     console.error('Dispute resolution failed:', error);
     return res.status(500).json({ error: 'تعذر معالجة النزاع' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
