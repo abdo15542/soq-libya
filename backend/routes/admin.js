@@ -62,6 +62,29 @@ router.get('/drivers', async (req, res) => {
   }
 });
 
+// طلبات توثيق الحسابات وصلاحيات البائع/المندوب
+router.get('/verification-requests', async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id, email, full_name, requested_role, verified, created_at FROM users WHERE requested_role IN ('seller', 'driver') AND id_image IS NOT NULL AND selfie_image IS NOT NULL ORDER BY created_at ASC"
+    );
+    res.json(result.rows);
+  } catch (error) { console.error('Verification request listing failed:', error); res.status(500).json({ error: 'تعذر جلب طلبات التوثيق' }); }
+});
+
+router.put('/users/:userId/approve-role', async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'معرّف الحساب غير صحيح' });
+  try {
+    const result = await pool.query(
+      "UPDATE users SET role = requested_role, verified = TRUE, requested_role = NULL WHERE id = $1 AND requested_role IN ('seller', 'driver') AND id_image IS NOT NULL AND selfie_image IS NOT NULL RETURNING id, role, verified",
+      [userId]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'طلب التوثيق غير موجود أو غير مكتمل' });
+    res.json({ success: true, user: result.rows[0] });
+  } catch (error) { console.error('Role approval failed:', error); res.status(500).json({ error: 'تعذر اعتماد طلب الحساب' }); }
+});
+
 // النزاعات المفتوحة
 router.get('/disputes', async (req, res) => {
   try {
