@@ -12,8 +12,9 @@ router.post('/', async (req, res) => {
   if (!Number.isSafeInteger(orderId) || orderId < 1 || reason.length < 5 || reason.length > 2000) {
     return res.status(400).json({ error: 'يرجى إدخال رقم طلب وسبب واضح للنزاع' });
   }
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const order = await client.query('SELECT id, customer_id, status FROM orders WHERE id = $1 FOR UPDATE', [orderId]);
     if (!order.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'الطلب غير موجود' }); }
@@ -33,7 +34,7 @@ router.post('/', async (req, res) => {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Dispute creation failed:', error);
     return res.status(500).json({ error: 'تعذر فتح النزاع' });
-  } finally { client.release(); }
+  } finally { if (client) client.release(); }
 });
 
 module.exports = router;
