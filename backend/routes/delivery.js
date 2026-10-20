@@ -41,8 +41,12 @@ router.get('/available-orders/:city', async (req, res) => {
 router.post('/accept-order', async (req, res) => {
   if (req.userRole !== 'driver') return res.status(403).json({ error: 'حساب المندوب مطلوب' });
   const orderId = Number(req.body.orderId);
+  const city = typeof req.body.city === 'string' ? req.body.city.trim() : '';
   if (!Number.isSafeInteger(orderId) || orderId < 1) {
     return res.status(400).json({ error: 'رقم الطلب غير صحيح' });
+  }
+  if (!city || city.length > 50) {
+    return res.status(400).json({ error: 'يرجى تحديد مدينة التوصيل بشكل صحيح' });
   }
   try {
     const result = await pool.query(
@@ -55,7 +59,7 @@ router.post('/accept-order', async (req, res) => {
            WHERE p.id = orders.product_id AND p.city = $3
          )
        RETURNING id, status, driver_id, customer_id, seller_id, product_id, total_amount, delivery_fee`,
-      [req.userId, orderId, String(req.body.city || '').trim()]
+      [req.userId, orderId, city]
     );
     if (!result.rowCount) {
       return res.status(409).json({ error: 'الطلب غير متاح أو المدينة غير مطابقة أو لم يتم توثيق المندوب' });
