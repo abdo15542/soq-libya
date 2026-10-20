@@ -8,6 +8,7 @@ router.use(checkAuth);
 
 // إنشاء طلب: الهوية من المستخدم المحمّل من قاعدة البيانات والسعر من المنتج.
 router.post('/', async (req, res) => {
+  if (req.userRole !== 'customer') return res.status(403).json({ error: 'حساب المشتري مطلوب لإنشاء الطلب' });
   const customerId = req.userId;
   const productId = Number(req.body.productId);
   const customerAddress = String(req.body.customerAddress || '').trim();
@@ -71,7 +72,9 @@ router.post('/', async (req, res) => {
 
 // طلبات الزبون: لا يمكن قراءة طلبات مستخدم آخر عبر تغيير المسار.
 router.get('/customer/:customerId', async (req, res) => {
-  if (req.userRole !== 'admin' && Number(req.params.customerId) !== Number(req.userId)) {
+  const customerId = Number(req.params.customerId);
+  if (!Number.isSafeInteger(customerId) || customerId < 1) return res.status(400).json({ error: 'رقم المشتري غير صحيح' });
+  if (req.userRole !== 'admin' && customerId !== Number(req.userId)) {
     return res.status(403).json({ error: 'غير مصرح بعرض طلبات هذا الحساب' });
   }
   try {
@@ -84,7 +87,7 @@ router.get('/customer/:customerId', async (req, res) => {
       LEFT JOIN users d ON o.driver_id = d.id
       WHERE o.customer_id = $1
       ORDER BY o.created_at DESC
-    `, [req.params.customerId]);
+    `, [customerId]);
     return res.json(result.rows);
   } catch (error) {
     console.error('Customer orders lookup failed:', error);
@@ -94,8 +97,10 @@ router.get('/customer/:customerId', async (req, res) => {
 
 // طلبات البائع
 router.get('/seller/:sellerId', async (req, res) => {
+  const sellerId = Number(req.params.sellerId);
+  if (!Number.isSafeInteger(sellerId) || sellerId < 1) return res.status(400).json({ error: 'رقم البائع غير صحيح' });
   if (req.userRole !== 'admin' &&
-      (Number(req.params.sellerId) !== Number(req.userId) || req.userRole !== 'seller')) {
+      (sellerId !== Number(req.userId) || req.userRole !== 'seller')) {
     return res.status(403).json({ error: 'غير مصرح بعرض طلبات هذا البائع' });
   }
   try {
@@ -107,7 +112,7 @@ router.get('/seller/:sellerId', async (req, res) => {
       JOIN users u ON o.customer_id = u.id
       WHERE o.seller_id = $1
       ORDER BY o.created_at DESC
-    `, [req.params.sellerId]);
+    `, [sellerId]);
     return res.json(result.rows);
   } catch (error) {
     console.error('Seller orders lookup failed:', error);
@@ -142,7 +147,6 @@ router.put('/:orderId/status', async (req, res) => {
     const isDriver = req.userRole === 'driver' && Number(order.driver_id) === Number(req.userId);
 
     let permitted = false;
-    let nextDriverId = order.driver_id;
     if (status === 'ready_for_pickup' && (isSeller || isAdmin) && order.status === 'pending') permitted = true;
     if (status === 'in_delivery' && isAdmin && order.status === 'ready_for_pickup') permitted = true;
     if (status === 'delivered' && (isDriver || isAdmin) && order.status === 'in_delivery') permitted = true;
