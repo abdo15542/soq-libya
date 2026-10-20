@@ -30,9 +30,10 @@ const DeliveryApp = ({ user }) => {
   };
 
   const acceptOrder = async (orderId) => {
-    await api.post('/delivery/accept-order', { orderId, driverId: user.id });
-    fetchAvailableOrders();
-    fetchMyOrders();
+    // The backend verifies the selected city against the order's product city.
+    // Never send driverId: the authenticated session determines the driver.
+    await api.post('/delivery/accept-order', { orderId, city });
+    await Promise.all([fetchAvailableOrders(), fetchMyOrders()]);
   };
 
   const markDelivered = async (orderId) => {
