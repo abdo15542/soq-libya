@@ -13,9 +13,23 @@ router.use(checkRole(['admin']));
 // إحصائيات
 router.get('/stats', async (req, res) => {
   try {
-    const orders = await pool.query('SELECT COUNT(*) as total, SUM(total_amount) as revenue FROM orders');
-    const profit = await pool.query(`SELECT SUM(o.total_amount * 0.10) as profit FROM orders o WHERE o.status = 'delivered'`);
-    const pending = await pool.query(`SELECT SUM(total_amount * 0.90) as pending FROM orders WHERE status = 'delivered' AND paid_to_seller = FALSE`);
+    // Count every order for operational reporting, but only count delivered
+    // orders as completed sales. Pending/cancelled/disputed orders are not revenue.
+    const orders = await pool.query(`
+      SELECT COUNT(*) AS total,
+             COALESCE(SUM(CASE WHEN status = 'delivered' THEN total_amount ELSE 0 END), 0) AS revenue
+      FROM orders
+    `);
+    const profit = await pool.query(`
+      SELECT COALESCE(SUM(o.total_amount * 0.10), 0) AS profit
+      FROM orders o
+      WHERE o.status = 'delivered'
+    `);
+    const pending = await pool.query(`
+      SELECT COALESCE(SUM(total_amount * 0.90), 0) AS pending
+      FROM orders
+      WHERE status = 'delivered' AND paid_to_seller = FALSE
+    `);
     const activeUsers = await pool.query('SELECT COUNT(*) as count FROM users WHERE verified = TRUE');
     
     res.json({
