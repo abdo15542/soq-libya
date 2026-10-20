@@ -7,6 +7,9 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process
 router.use(checkAuth);
 
 router.post('/', async (req, res) => {
+  if (req.userRole !== 'customer') {
+    return res.status(403).json({ error: 'فتح النزاعات متاح لحساب المشتري فقط' });
+  }
   const orderId = Number(req.body.orderId);
   const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
   if (!Number.isSafeInteger(orderId) || orderId < 1 || reason.length < 5 || reason.length > 2000) {
