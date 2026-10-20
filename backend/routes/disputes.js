@@ -21,8 +21,9 @@ router.post('/', async (req, res) => {
     if (Number(order.rows[0].customer_id) !== Number(req.userId)) {
       await client.query('ROLLBACK'); return res.status(403).json({ error: 'يمكن لزبون الطلب فقط فتح النزاع' });
     }
-    if (['cancelled', 'refunded'].includes(order.rows[0].status)) {
-      await client.query('ROLLBACK'); return res.status(409).json({ error: 'لا يمكن فتح نزاع لهذا الطلب' });
+    const disputeEligibleStatuses = ['pending', 'ready_for_pickup', 'in_delivery', 'delivered'];
+    if (!disputeEligibleStatuses.includes(order.rows[0].status)) {
+      await client.query('ROLLBACK'); return res.status(409).json({ error: 'لا يمكن فتح نزاع في حالة الطلب الحالية' });
     }
     const existing = await client.query("SELECT id FROM disputes WHERE order_id = $1 AND status = 'open'", [orderId]);
     if (existing.rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'يوجد نزاع مفتوح لهذا الطلب بالفعل' }); }
