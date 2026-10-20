@@ -70,7 +70,8 @@ const DeliveryApp = ({ user }) => {
 
   const markDelivered = async (orderId) => {
     setActionError('');
-    setListError('');
+    setAvailableOrdersError('');
+    setMyOrdersError('');
     setBusyOrderId(orderId);
     try {
       await api.put(`/orders/${orderId}/status`, { status: 'delivered' });
@@ -144,7 +145,7 @@ const DeliveryApp = ({ user }) => {
             <p>الزبون: {order.customer_name}</p>
             <p>العنوان: {order.customer_address}</p>
             <p>المبلغ المطلوب تحصيله: {order.total_amount} د.ل</p>
-            <button type="button" disabled={busyOrderId === order.id} onClick={() => markDelivered(order.id)}>
+            <button type="button" disabled={busyOrderId !== null} onClick={() => markDelivered(order.id)}>
               {busyOrderId === order.id ? 'جارٍ المعالجة...' : 'تم التوصيل والتحصيل'}
             </button>
           </div>
