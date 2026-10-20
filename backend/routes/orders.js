@@ -148,7 +148,7 @@ router.put('/:orderId/status', async (req, res) => {
 
     let permitted = false;
     if (status === 'ready_for_pickup' && (isSeller || isAdmin) && order.status === 'pending') permitted = true;
-    if (status === 'in_delivery' && isAdmin && order.status === 'ready_for_pickup') permitted = true;
+    // Only /delivery/accept-order may enter in_delivery: it atomically assigns a verified driver.
     if (status === 'delivered' && (isDriver || isAdmin) && order.status === 'in_delivery') permitted = true;
     if (status === 'cancelled' && (isCustomer || isAdmin) && ['pending', 'ready_for_pickup'].includes(order.status)) permitted = true;
     if (!permitted) {
