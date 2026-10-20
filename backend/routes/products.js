@@ -30,7 +30,7 @@ router.get('/:productId', async (req, res) => {
       SELECT p.*, u.full_name as seller_name, u.rating as seller_rating, u.id as seller_id
       FROM products p 
       JOIN users u ON p.seller_id = u.id 
-      WHERE p.id = $1
+      WHERE p.id = $1 AND p.stock > 0
     `, [productId]);
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'المنتج غير موجود' });
