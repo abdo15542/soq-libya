@@ -14,6 +14,12 @@ router.get('/available-orders/:city', async (req, res) => {
   const city = String(req.params.city || '').trim();
   if (!city || city.length > 50) return res.status(400).json({ error: 'المدينة غير صحيحة' });
   try {
+    if (req.userRole === 'driver') {
+      const verification = await pool.query('SELECT verified FROM users WHERE id = $1 AND role = $2', [req.userId, 'driver']);
+      if (!verification.rowCount || verification.rows[0].verified !== true) {
+        return res.status(403).json({ error: 'يجب توثيق حساب المندوب قبل عرض طلبات التوصيل' });
+      }
+    }
     const result = await pool.query(`
       SELECT o.id, o.status, o.total_amount, o.delivery_fee, o.created_at,
              p.name AS product_name, p.city, u.full_name AS seller_name
@@ -43,6 +49,7 @@ router.post('/accept-order', async (req, res) => {
       `UPDATE orders
        SET status = 'in_delivery', driver_id = $1
        WHERE id = $2 AND status = 'ready_for_pickup' AND driver_id IS NULL
+         AND EXISTS (SELECT 1 FROM users WHERE id = $1 AND role = 'driver' AND verified = TRUE)
        RETURNING id, status, driver_id, customer_id, seller_id, product_id, total_amount, delivery_fee`,
       [req.userId, orderId]
     );
@@ -58,8 +65,10 @@ router.post('/accept-order', async (req, res) => {
 
 // لا يمكن للمندوب عرض مهام مندوب آخر بتغيير المعرف في الرابط.
 router.get('/driver/:driverId', async (req, res) => {
+  const driverId = Number(req.params.driverId);
+  if (!Number.isSafeInteger(driverId) || driverId < 1) return res.status(400).json({ error: 'رقم المندوب غير صحيح' });
   if (req.userRole !== 'admin' &&
-      (req.userRole !== 'driver' || Number(req.params.driverId) !== Number(req.userId))) {
+      (req.userRole !== 'driver' || driverId !== Number(req.userId))) {
     return res.status(403).json({ error: 'غير مصرح بعرض طلبات هذا المندوب' });
   }
   try {
@@ -74,7 +83,7 @@ router.get('/driver/:driverId', async (req, res) => {
       WHERE o.driver_id = $1 AND o.status IN ('in_delivery', 'delivered')
       ORDER BY o.created_at DESC
       LIMIT 200
-    `, [req.params.driverId]);
+    `, [driverId]);
     return res.json(result.rows);
   } catch (error) {
     console.error('Driver orders lookup failed:', error);
