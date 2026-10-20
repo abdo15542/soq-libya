@@ -108,8 +108,8 @@ router.put('/:productId', checkAuth, async (req, res) => {
     );
     return res.json({ success: true, product: updated.rows[0] });
   } catch (error) {
-    console.error('Seller products lookup failed:', error);
-    res.status(500).json({ error: 'تعذر جلب منتجات البائع حاليًا' });
+    console.error('Product update failed:', error);
+    res.status(500).json({ error: 'تعذر تحديث المنتج حاليًا' });
   }
 });
 
@@ -128,7 +128,8 @@ router.delete('/:productId', checkAuth, async (req, res) => {
     await pool.query('UPDATE products SET stock = 0 WHERE id = $1', [productId]);
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Product hide failed:', error);
+    res.status(500).json({ error: 'تعذر إخفاء المنتج حاليًا' });
   }
 });
 
@@ -145,7 +146,8 @@ router.get('/seller/:sellerId', async (req, res) => {
     );
     res.json(result.rows);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Seller products lookup failed:', error);
+    res.status(500).json({ error: 'تعذر جلب منتجات البائع حاليًا' });
   }
 });
 
