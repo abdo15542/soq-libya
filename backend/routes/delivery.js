@@ -50,11 +50,15 @@ router.post('/accept-order', async (req, res) => {
        SET status = 'in_delivery', driver_id = $1
        WHERE id = $2 AND status = 'ready_for_pickup' AND driver_id IS NULL
          AND EXISTS (SELECT 1 FROM users WHERE id = $1 AND role = 'driver' AND verified = TRUE)
+         AND EXISTS (
+           SELECT 1 FROM products p
+           WHERE p.id = orders.product_id AND p.city = $3
+         )
        RETURNING id, status, driver_id, customer_id, seller_id, product_id, total_amount, delivery_fee`,
-      [req.userId, orderId]
+      [req.userId, orderId, String(req.body.city || '').trim()]
     );
     if (!result.rowCount) {
-      return res.status(409).json({ error: 'الطلب لم يعد متاحًا أو تم استلامه من مندوب آخر' });
+      return res.status(409).json({ error: 'الطلب غير متاح أو المدينة غير مطابقة أو لم يتم توثيق المندوب' });
     }
     return res.json({ success: true, order: result.rows[0] });
   } catch (error) {
