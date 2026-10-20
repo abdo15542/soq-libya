@@ -232,18 +232,39 @@ router.put('/disputes/:disputeId/resolve', async (req, res) => {
       return res.status(404).json({ error: 'النزاع غير موجود أو تمت معالجته مسبقًا' });
     }
 
-    const orderId = dispute.rows[0].order_id;
-    await client.query(
-      "UPDATE disputes SET status = 'resolved', resolution = $1 WHERE id = $2",
+    const orderId = Number(dispute.rows[0].order_id);
+    // Lock and verify the associated order too, so dispute resolution cannot
+    // overwrite an order that has changed outside the dispute workflow.
+    const order = await client.query('SELECT id, status FROM orders WHERE id = $1 FOR UPDATE', [orderId]);
+    if (!order.rowCount || order.rows[0].status !== 'disputed') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'حالة الطلب تغيرت؛ راجع الطلب قبل حل النزاع' });
+    }
+
+    if (resolution === 'refund') {
+      const refunded = await client.query(
+        "UPDATE orders SET status = 'refunded' WHERE id = $1 AND status = 'disputed' RETURNING id",
+        [orderId]
+      );
+      if (refunded.rowCount !== 1) throw new Error('Order state changed while resolving refund');
+    } else {
+      const previousStatus = dispute.rows[0].order_status_before_dispute;
+      if (!['pending', 'ready_for_pickup', 'in_delivery', 'delivered'].includes(previousStatus)) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'حالة الطلب السابقة غير صالحة للاستعادة' });
+      }
+      const restored = await client.query(
+        'UPDATE orders SET status = $1 WHERE id = $2 AND status = $3 RETURNING id',
+        [previousStatus, orderId, 'disputed']
+      );
+      if (restored.rowCount !== 1) throw new Error('Order state changed while dismissing dispute');
+    }
+
+    const resolved = await client.query(
+      "UPDATE disputes SET status = 'resolved', resolution = $1 WHERE id = $2 AND status = 'open' RETURNING id",
       [resolution, disputeId]
     );
-    if (resolution === 'refund') {
-      await client.query("UPDATE orders SET status = 'refunded' WHERE id = $1", [orderId]);
-    } else {
-      // Keep the order out of the disputed state after a dismissed dispute.
-      const previousStatus = dispute.rows[0].order_status_before_dispute;
-      if (previousStatus) await client.query('UPDATE orders SET status = $1 WHERE id = $2 AND status = $3', [previousStatus, orderId, 'disputed']);
-    }
+    if (resolved.rowCount !== 1) throw new Error('Dispute state changed while resolving');
     await client.query('COMMIT');
     return res.json({ success: true });
   } catch (error) {
