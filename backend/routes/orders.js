@@ -25,8 +25,9 @@ router.post('/', async (req, res) => {
     return res.status(503).json({ error: 'خدمة إنشاء الطلبات غير مهيأة للتوصيل حاليًا' });
   }
 
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const productResult = await client.query(
       'SELECT id, seller_id, price, stock FROM products WHERE id = $1 FOR UPDATE',
@@ -62,11 +63,11 @@ router.post('/', async (req, res) => {
     await client.query('COMMIT');
     return res.status(201).json({ success: true, order: inserted.rows[0] });
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Create order failed:', error);
     return res.status(500).json({ error: 'تعذر إنشاء الطلب حاليًا' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
