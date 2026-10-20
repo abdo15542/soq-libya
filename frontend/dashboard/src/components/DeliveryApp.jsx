@@ -6,6 +6,8 @@ const DeliveryApp = ({ user }) => {
   const [myOrders, setMyOrders] = useState([]);
   const [city, setCity] = useState('طرابلس');
   const [active, setActive] = useState(true);
+  const [actionError, setActionError] = useState('');
+  const [busyOrderId, setBusyOrderId] = useState(null);
 
   useEffect(() => {
     if (active) {
@@ -30,19 +32,36 @@ const DeliveryApp = ({ user }) => {
   };
 
   const acceptOrder = async (orderId) => {
-    // The backend verifies the selected city against the order's product city.
-    // Never send driverId: the authenticated session determines the driver.
-    await api.post('/delivery/accept-order', { orderId, city });
-    await Promise.all([fetchAvailableOrders(), fetchMyOrders()]);
+    setActionError('');
+    setBusyOrderId(orderId);
+    try {
+      // The backend verifies the selected city against the order's product city.
+      // Never send driverId: the authenticated session determines the driver.
+      await api.post('/delivery/accept-order', { orderId, city });
+      await Promise.all([fetchAvailableOrders(), fetchMyOrders()]);
+    } catch (error) {
+      setActionError(error.response?.data?.error || 'تعذر قبول الطلب. حدّث القائمة وحاول مرة أخرى.');
+    } finally {
+      setBusyOrderId(null);
+    }
   };
 
   const markDelivered = async (orderId) => {
-    await api.put(`/orders/${orderId}/status`, { status: 'delivered' });
-    fetchMyOrders();
+    setActionError('');
+    setBusyOrderId(orderId);
+    try {
+      await api.put(`/orders/${orderId}/status`, { status: 'delivered' });
+      await fetchMyOrders();
+    } catch (error) {
+      setActionError(error.response?.data?.error || 'تعذر إتمام الطلب. تحقق من الاتصال وحاول مرة أخرى.');
+    } finally {
+      setBusyOrderId(null);
+    }
   };
 
   return (
     <div className="delivery-app">
+      {actionError && <p role="alert" className="error-message">{actionError}</p>}
       <div className="status-toggle">
         <label>
           <input type="checkbox" checked={active} onChange={() => setActive(!active)} />
@@ -65,7 +84,9 @@ const DeliveryApp = ({ user }) => {
               <p>استلام من: {order.seller_name}</p>
               <p>توصيل إلى: {order.customer_name}</p>
               <p>أجرة التوصيل: {order.delivery_fee} د.ل</p>
-              <button onClick={() => acceptOrder(order.id)}>قبول الطلب</button>
+              <button disabled={busyOrderId === order.id} onClick={() => acceptOrder(order.id)}>
+                {busyOrderId === order.id ? 'جارٍ المعالجة...' : 'قبول الطلب'}
+              </button>
             </div>
           ))}
         </section>
@@ -79,7 +100,9 @@ const DeliveryApp = ({ user }) => {
             <p>الزبون: {order.customer_name}</p>
             <p>العنوان: {order.customer_address}</p>
             <p>المبلغ المطلوب تحصيله: {order.total_amount} د.ل</p>
-            <button onClick={() => markDelivered(order.id)}>تم التوصيل والتحصيل</button>
+            <button disabled={busyOrderId === order.id} onClick={() => markDelivered(order.id)}>
+              {busyOrderId === order.id ? 'جارٍ المعالجة...' : 'تم التوصيل والتحصيل'}
+            </button>
           </div>
         ))}
       </section>
