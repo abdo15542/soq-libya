@@ -35,7 +35,7 @@ router.post('/', async (req, res) => {
     await client.query('COMMIT');
     return res.status(201).json({ success: true, dispute: created.rows[0] });
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Dispute creation failed:', error);
     return res.status(500).json({ error: 'تعذر فتح النزاع' });
   } finally { if (client) client.release(); }
