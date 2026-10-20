@@ -242,11 +242,12 @@ router.put('/disputes/:disputeId/resolve', async (req, res) => {
     }
 
     if (resolution === 'refund') {
-      const refunded = await client.query(
-        "UPDATE orders SET status = 'refunded' WHERE id = $1 AND status = 'disputed' RETURNING id",
-        [orderId]
-      );
-      if (refunded.rowCount !== 1) throw new Error('Order state changed while resolving refund');
+      // Do not label an order refunded until a real payment provider/wallet
+      // integration can execute and verify the money movement.
+      await client.query('ROLLBACK');
+      return res.status(501).json({
+        error: 'الاسترداد المالي غير مفعّل بعد؛ لم يتم تغيير حالة الطلب أو تحويل أي أموال'
+      });
     } else {
       const previousStatus = dispute.rows[0].order_status_before_dispute;
       if (!['pending', 'ready_for_pickup', 'in_delivery', 'delivered'].includes(previousStatus)) {
