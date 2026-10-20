@@ -133,8 +133,9 @@ router.put('/:orderId/status', async (req, res) => {
     return res.status(400).json({ error: 'حالة الطلب غير مسموحة' });
   }
 
-  const client = await pool.connect();
+  let client;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const result = await client.query('SELECT * FROM orders WHERE id = $1 FOR UPDATE', [orderId]);
     if (!result.rowCount) {
@@ -176,11 +177,11 @@ router.put('/:orderId/status', async (req, res) => {
     await client.query('COMMIT');
     return res.json({ success: true, order: updated.rows[0] });
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Order status update failed:', error);
     return res.status(500).json({ error: 'تعذر تحديث حالة الطلب' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
