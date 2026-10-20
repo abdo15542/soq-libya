@@ -6,6 +6,7 @@ const AdminDashboard = () => {
   const [sellers, setSellers] = useState([]);
   const [drivers, setDrivers] = useState([]);
   const [disputes, setDisputes] = useState([]);
+  const [verificationRequests, setVerificationRequests] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
@@ -13,6 +14,7 @@ const AdminDashboard = () => {
     fetchSellers();
     fetchDrivers();
     fetchDisputes();
+    fetchVerificationRequests();
   }, []);
 
   const fetchStats = async () => {
@@ -30,6 +32,20 @@ const AdminDashboard = () => {
   const fetchDisputes = async () => {
     const res = await api.get('/admin/disputes');
     setDisputes(res.data);
+  };
+  const fetchVerificationRequests = async () => {
+    try { const res = await api.get('/admin/verification-requests'); setVerificationRequests(res.data); }
+    catch (error) { console.error('تعذر تحميل طلبات التوثيق', error); }
+  };
+  const handleApproveRole = async (userId) => {
+    if (!window.confirm('هل راجعت الوثائق وتريد اعتماد صلاحية الحساب؟')) return;
+    try {
+      await api.put('/admin/users/' + userId + '/approve-role');
+      await fetchVerificationRequests();
+      await fetchSellers();
+      await fetchDrivers();
+      alert('تم اعتماد الطلب بنجاح.');
+    } catch (error) { alert(error.response?.data?.error || 'تعذر اعتماد الطلب.'); }
   };
 
   const handleVerifyUser = async (userId, verified) => {
@@ -51,6 +67,7 @@ const AdminDashboard = () => {
         <button onClick={() => setActiveTab('overview')} className={activeTab === 'overview' ? 'active' : ''}>نظرة عامة</button>
         <button onClick={() => setActiveTab('sellers')} className={activeTab === 'sellers' ? 'active' : ''}>البائعين</button>
         <button onClick={() => setActiveTab('drivers')} className={activeTab === 'drivers' ? 'active' : ''}>المندوبين</button>
+        <button onClick={() => setActiveTab('verification')} className={activeTab === 'verification' ? 'active' : ''}>طلبات التوثيق ({verificationRequests.length})</button>
         <button onClick={() => setActiveTab('disputes')} className={activeTab === 'disputes' ? 'active' : ''}>النزاعات</button>
       </div>
 
@@ -71,6 +88,17 @@ const AdminDashboard = () => {
               <td><button onClick={() => handleVerifyUser(s.id, !s.verified)}>{s.verified ? 'إلغاء' : 'توثيق'}</button></td></tr>
           ))}</tbody>
         </table>
+      )}
+
+      {activeTab === 'verification' && (
+        <section>
+          <h3>طلبات اعتماد البائعين والمندوبين</h3>
+          {verificationRequests.length === 0 ? <p>لا توجد طلبات معلقة حاليًا.</p> : (
+            <table><thead><tr><th>الاسم</th><th>البريد</th><th>نوع الطلب</th><th>الوثائق</th><th>الإجراء</th></tr></thead><tbody>
+              {verificationRequests.map(request => <tr key={request.id}><td>{request.full_name || 'بدون اسم'}</td><td>{request.email || '—'}</td><td>{request.requested_role === 'seller' ? 'بائع' : 'مندوب توصيل'}</td><td><div style={{display:'flex',gap:8,flexWrap:'wrap'}}><a href={request.id_image} target='_blank' rel='noreferrer'>عرض الوثيقة</a><a href={request.selfie_image} target='_blank' rel='noreferrer'>عرض السيلفي</a></div></td><td><button onClick={() => handleApproveRole(request.id)}>اعتماد بعد مراجعة الوثائق</button></td></tr>)}
+            </tbody></table>
+          )}
+        </section>
       )}
 
       {activeTab === 'disputes' && disputes.map(d => (

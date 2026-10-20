@@ -1,0 +1,35 @@
+name: Frontend build
+
+on:
+  pull_request:
+    paths:
+      - "frontend/dashboard/**"
+      - ".github/workflows/frontend-build.yml"
+  push:
+    branches:
+      - main
+      - feat/production-hardening-android-apk
+    paths:
+      - "frontend/dashboard/**"
+      - ".github/workflows/frontend-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/dashboard
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Build frontend
+        run: npm run build
