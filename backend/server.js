@@ -6,23 +6,20 @@ const { Pool } = require('pg');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cron = require('node-cron');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
-});
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173').split(',').map(value => value.trim()).filter(Boolean);
+const io = new Server(server, { cors: { origin: allowedOrigins, methods: ['GET', 'POST'] } });
 
 // Middleware
 app.use(helmet({
   contentSecurityPolicy: false, // لتجنب مشاكل CSP مع Leaflet
   crossOriginEmbedderPolicy: false
 }));
-app.use(cors());
+app.use(cors({ origin(origin, callback) { if (!origin || allowedOrigins.includes(origin)) return callback(null, true); return callback(new Error('Origin not allowed by CORS')); } }));
 app.use(express.json({ limit: '10mb' }));
 
 // Rate limiting
@@ -31,6 +28,8 @@ const limiter = rateLimit({
   max: 200,
   message: 'طلبات كثيرة جداً، حاول مرة أخرى لاحقاً.'
 });
+app.use('/api/auth/google', rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'محاولات تسجيل كثيرة. انتظر قليلًا ثم حاول مجددًا.' } }));
+app.use('/api/auth/verify', rateLimit({ windowMs: 60 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false, message: { error: 'تجاوزت عدد طلبات التوثيق المسموح. حاول بعد ساعة.' } }));
 app.use('/api/', limiter);
 
 // قاعدة البيانات
@@ -45,7 +44,9 @@ const createTables = async () => {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
-        phone VARCHAR(20) UNIQUE NOT NULL,
+        phone VARCHAR(255) UNIQUE,
+        google_sub VARCHAR(255) UNIQUE,
+        email VARCHAR(320),
         full_name VARCHAR(100),
         id_image TEXT,
         selfie_image TEXT,
@@ -135,38 +136,100 @@ const createTables = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
-    console.log('✅ تم إنشاء الجداول بنجاح');
+    await pool.query('ALTER TABLE disputes ADD COLUMN IF NOT EXISTS order_status_before_dispute VARCHAR(30)');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS id_image TEXT');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS selfie_image TEXT');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(100)');
+    await pool.query('ALTER TABLE users ALTER COLUMN phone TYPE VARCHAR(255)');
+    await pool.query('ALTER TABLE users ALTER COLUMN phone DROP NOT NULL');
+    await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS requested_role VARCHAR(20) CHECK (requested_role IN ('customer', 'seller', 'driver'))");
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS google_sub VARCHAR(255)');
+    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(320)');
+    await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_google_sub_unique ON users (google_sub) WHERE google_sub IS NOT NULL');
+    await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (LOWER(email)) WHERE email IS NOT NULL');
+    console.log('✅ تم إنشاء الجداول وتهيئة حقول الهوية');
   } catch (err) {
     console.error('❌ خطأ في إنشاء الجداول:', err);
+    throw err;
   }
 };
-createTables();
 
-// Socket.io للمحادثة
+// Socket.IO authenticates with the same signed session as REST APIs.
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth && socket.handshake.auth.token;
+  if (typeof token !== 'string' || !token || !process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) return next(new Error('UNAUTHORIZED'));
+  let claims;
+  try { claims = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'], issuer: 'soq-libya-api', audience: 'soq-libya-client' }); } catch { return next(new Error('UNAUTHORIZED')); }
+  const userId = Number(claims.sub);
+  if (claims.typ !== 'access' || !Number.isSafeInteger(userId) || userId < 1) return next(new Error('UNAUTHORIZED'));
+  try {
+    const user = await pool.query('SELECT id, role FROM users WHERE id = $1', [userId]);
+    if (!user.rowCount) return next(new Error('UNAUTHORIZED'));
+    socket.data.userId = Number(user.rows[0].id);
+    socket.data.userRole = user.rows[0].role || 'customer';
+    return next();
+  } catch (error) { console.error('Socket authentication failed:', error); return next(new Error('AUTH_UNAVAILABLE')); }
+});
+
+const canAccessOrder = async (userId, userRole, orderId) => {
+  if (userRole === 'admin') return true;
+  const result = await pool.query(
+    'SELECT id FROM orders WHERE id = $1 AND (customer_id = $2 OR seller_id = $2 OR driver_id = $2)',
+    [orderId, userId]
+  );
+  return result.rowCount > 0;
+};
+
 io.on('connection', (socket) => {
-  console.log('مستخدم متصل:', socket.id);
-  
-  socket.on('join-order-room', (orderId) => {
-    socket.join(`order-${orderId}`);
-  });
-  
-  socket.on('send-message', async (data) => {
-    const { orderId, senderId, message } = data;
+  socket.on('join-order-room', async (rawOrderId, acknowledge) => {
+    const orderId = Number(rawOrderId);
+    if (!Number.isSafeInteger(orderId) || orderId < 1) {
+      if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'INVALID_ORDER' });
+      return;
+    }
     try {
-      await pool.query(
-        'INSERT INTO chats (order_id, sender_id, message) VALUES ($1, $2, $3)',
-        [orderId, senderId, message]
-      );
-      io.to(`order-${orderId}`).emit('new-message', {
-        senderId, message, sentAt: new Date()
-      });
-    } catch (err) {
-      console.error(err);
+      if (!(await canAccessOrder(socket.data.userId, socket.data.userRole, orderId))) {
+        if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'FORBIDDEN' });
+        return;
+      }
+      socket.join(`order-${orderId}`);
+      if (typeof acknowledge === 'function') acknowledge({ success: true });
+    } catch (error) {
+      console.error('Socket room authorization failed:', error);
+      if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'SERVER_ERROR' });
     }
   });
-  
-  socket.on('disconnect', () => {
-    console.log('مستخدم قطع الاتصال:', socket.id);
+
+  socket.on('send-message', async (data, acknowledge) => {
+    const orderId = Number(data && data.orderId);
+    const message = typeof (data && data.message) === 'string' ? data.message.trim() : '';
+    if (!Number.isSafeInteger(orderId) || orderId < 1 || !message || message.length > 2000) {
+      if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'INVALID_MESSAGE' });
+      return;
+    }
+    try {
+      if (!(await canAccessOrder(socket.data.userId, socket.data.userRole, orderId))) {
+        if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'FORBIDDEN' });
+        return;
+      }
+      const inserted = await pool.query(
+        'INSERT INTO chats (order_id, sender_id, message) VALUES ($1, $2, $3) RETURNING id, sent_at',
+        [orderId, socket.data.userId, message]
+      );
+      io.to(`order-${orderId}`).emit('new-message', {
+        id: inserted.rows[0].id,
+        order_id: orderId,
+        sender_id: socket.data.userId,
+        senderId: socket.data.userId,
+        message,
+        sent_at: inserted.rows[0].sent_at,
+        sentAt: inserted.rows[0].sent_at
+      });
+      if (typeof acknowledge === 'function') acknowledge({ success: true });
+    } catch (error) {
+      console.error('Socket message send failed:', error);
+      if (typeof acknowledge === 'function') acknowledge({ success: false, error: 'SERVER_ERROR' });
+    }
   });
 });
 
@@ -190,6 +253,19 @@ cron.schedule('0 0 * * 0', () => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 السوق الليبي يعمل على المنفذ ${PORT}`);
-});
+
+// Do not accept traffic until the database schema is initialized successfully.
+const startServer = async () => {
+  try {
+    await createTables();
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 السوق الليبي يعمل على المنفذ ${PORT}`);
+    });
+  } catch (error) {
+    console.error('تعذر تشغيل الخادم لأن قاعدة البيانات غير جاهزة.');
+    process.exitCode = 1;
+    server.close(() => process.exit(1));
+  }
+};
+
+startServer();

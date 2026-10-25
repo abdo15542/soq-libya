@@ -8,30 +8,36 @@ import AdminDashboard from './components/AdminDashboard';
 import ProductDetail from './components/ProductDetail';
 import { Terms, Privacy } from './components/StaticPages';
 import api from './utils/api';
+import VerificationRequest from './components/VerificationRequest';
 
 function App() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('soq_user');
-    if (savedUser) {
-      const parsed = JSON.parse(savedUser);
-      setUser(parsed);
-      // تحديث بيانات المستخدم من الخادم
-      api.get(`/auth/me/${parsed.id}`).then(res => {
-        setUser(res.data);
-        localStorage.setItem('soq_user', JSON.stringify(res.data));
-      }).catch(() => {
+    let active = true;
+    const restoreSession = async () => {
+      try {
+        const session = JSON.parse(localStorage.getItem('soq_session') || 'null');
+        if (!session?.token) throw new Error('NO_SESSION');
+        const response = await api.get('/auth/me');
+        if (!active) return;
+        setUser(response.data);
+        localStorage.setItem('soq_user', JSON.stringify(response.data));
+        localStorage.setItem('soq_session', JSON.stringify({ ...session, user: response.data }));
+      } catch {
         localStorage.removeItem('soq_user');
-        setUser(null);
-      });
-    }
-    setLoading(false);
+        localStorage.removeItem('soq_session');
+        if (active) setUser(null);
+      } finally { if (active) setLoading(false); }
+    };
+    restoreSession();
+    return () => { active = false; };
   }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('soq_user');
+    localStorage.removeItem('soq_session');
     setUser(null);
     window.location.href = '/';
   };
@@ -62,7 +68,8 @@ function App() {
         <header className="app-header">
           <h1>السوق الليبي</h1>
           <div className="user-info">
-            <span>{user.full_name || user.phone}</span>
+            <span>{user.full_name || user.email || user.phone}</span>
+            <a href="/verify-account">طلب توثيق الحساب</a>
             <button onClick={handleLogout}>خروج</button>
           </div>
         </header>
@@ -77,6 +84,7 @@ function App() {
           <Route path="/product/:id" element={<ProductDetail user={user} onBuy={handleBuy} />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/privacy" element={<Privacy />} />
+          <Route path="/verify-account" element={<VerificationRequest />} />
         </Routes>
         <footer className="app-footer">
           <a href="/terms">شروط الاستخدام</a> | <a href="/privacy">سياسة الخصوصية</a>

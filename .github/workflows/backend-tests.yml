@@ -1,0 +1,40 @@
+name: Backend tests
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-tests.yml"
+  push:
+    branches:
+      - main
+      - feat/production-hardening-android-apk
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run backend unit tests
+        run: npm test
+      - name: Check JavaScript syntax
+        run: |
+          find . -path './node_modules' -prune -o -name '*.js' -type f -print0 | xargs -0 -n1 node --check
