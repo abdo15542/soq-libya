@@ -1,0 +1,72 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Unzip project
+        run: unzip -q souq-libya.zip -d work
+
+      - name: Generate Android scaffold
+        working-directory: work/souq
+        run: |
+          flutter create --platforms=android --org ly.souq --project-name souq_libya /tmp/scaffold
+          rm -rf android
+          cp -r /tmp/scaffold/android ./android
+
+      - name: Patch AndroidManifest
+        working-directory: work/souq
+        run: |
+          python3 - <<'PY'
+          import re
+          p = 'android/app/src/main/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+          extra = '''<uses-permission android:name="android.permission.INTERNET"/>
+              <queries>
+                  <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent>
+                  <intent><action android:name="android.intent.action.DIAL"/><data android:scheme="tel"/></intent>
+              </queries>
+              <application'''
+          s = s.replace('<application', extra, 1)
+          s = re.sub(r'android:label="[^"]*"', 'android:label="سوق ليبيا"', s, count=1)
+          open(p, 'w', encoding='utf-8').write(s)
+          PY
+
+      - name: Build release APK
+        working-directory: work/souq
+        run: |
+          flutter pub get
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk ../../souq-libya.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: souq-libya-apk
+          path: souq-libya.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: سوق ليبيا - بناء ${{ github.run_number }}
+          files: souq-libya.apk
