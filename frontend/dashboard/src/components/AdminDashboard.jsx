@@ -10,6 +10,8 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [disputeActionError, setDisputeActionError] = useState('');
   const [busyDisputeId, setBusyDisputeId] = useState(null);
+  const [userActionError, setUserActionError] = useState('');
+  const [busyUserId, setBusyUserId] = useState(null);
 
   useEffect(() => {
     fetchStats();
@@ -51,9 +53,16 @@ const AdminDashboard = () => {
   };
 
   const handleVerifyUser = async (userId, verified) => {
-    await api.put(`/admin/users/${userId}/verify`, { verified });
-    fetchSellers();
-    fetchDrivers();
+    setUserActionError('');
+    setBusyUserId(userId);
+    try {
+      await api.put(`/admin/users/${userId}/verify`, { verified });
+      await Promise.all([fetchSellers(), fetchDrivers()]);
+    } catch (error) {
+      setUserActionError(error.response?.data?.error || 'تعذر تحديث توثيق الحساب. لم يتم تأكيد التغيير.');
+    } finally {
+      setBusyUserId(null);
+    }
   };
 
   const handleResolveDispute = async (disputeId, resolution) => {
@@ -91,11 +100,13 @@ const AdminDashboard = () => {
         </div>
       )}
 
+      {activeTab === 'sellers' && userActionError && <p role="alert" className="error-message">{userActionError}</p>}
+      {activeTab === 'drivers' && userActionError && <p role="alert" className="error-message">{userActionError}</p>}
       {activeTab === 'sellers' && (
         <table><thead><tr><th>الاسم</th><th>الهاتف</th><th>موثق</th><th>التقييم</th><th>المبيعات</th><th>إجراء</th></tr></thead>
           <tbody>{sellers.map(s => (
             <tr key={s.id}><td>{s.full_name}</td><td>{s.phone}</td><td>{s.verified ? '✅' : '❌'}</td><td>{s.rating}</td><td>{s.total_sales} د.ل</td>
-              <td><button onClick={() => handleVerifyUser(s.id, !s.verified)}>{s.verified ? 'إلغاء' : 'توثيق'}</button></td></tr>
+              <td><button type="button" disabled={busyUserId !== null} onClick={() => handleVerifyUser(s.id, !s.verified)}>{busyUserId === s.id ? 'جارٍ التحديث...' : s.verified ? 'إلغاء' : 'توثيق'}</button></td></tr>
           ))}</tbody>
         </table>
       )}
