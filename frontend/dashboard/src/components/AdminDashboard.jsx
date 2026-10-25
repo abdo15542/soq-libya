@@ -8,6 +8,8 @@ const AdminDashboard = () => {
   const [disputes, setDisputes] = useState([]);
   const [verificationRequests, setVerificationRequests] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
+  const [disputeActionError, setDisputeActionError] = useState('');
+  const [busyDisputeId, setBusyDisputeId] = useState(null);
 
   useEffect(() => {
     fetchStats();
@@ -55,9 +57,16 @@ const AdminDashboard = () => {
   };
 
   const handleResolveDispute = async (disputeId, resolution) => {
-    await api.put(`/admin/disputes/${disputeId}/resolve`, { resolution });
-    fetchDisputes();
-    fetchStats();
+    setDisputeActionError('');
+    setBusyDisputeId(disputeId);
+    try {
+      await api.put(`/admin/disputes/${disputeId}/resolve`, { resolution });
+      await Promise.all([fetchDisputes(), fetchStats()]);
+    } catch (error) {
+      setDisputeActionError(error.response?.data?.error || 'تعذرت معالجة النزاع. لم يتم تأكيد أي تغيير.');
+    } finally {
+      setBusyDisputeId(null);
+    }
   };
 
   return (
@@ -74,9 +83,10 @@ const AdminDashboard = () => {
       {activeTab === 'overview' && (
         <div className="stats-grid">
           <div className="stat-card"><h3>إجمالي الطلبات</h3><p>{stats.totalOrders}</p></div>
-          <div className="stat-card"><h3>إجمالي المبيعات</h3><p>{stats.totalRevenue} د.ل</p></div>
-          <div className="stat-card"><h3>صافي أرباح المنصة</h3><p>{stats.platformProfit} د.ل</p></div>
-          <div className="stat-card"><h3>مستحقات معلقة</h3><p>{stats.pendingPayouts} د.ل</p></div>
+          <div className="stat-card"><h3>مبيعات الطلبات المسلّمة</h3><p>{stats.totalRevenue} د.ل</p></div>
+          <div className="stat-card"><h3>عمولة المنصة التقديرية (10%)</h3><p>{stats.platformProfit} د.ل</p></div>
+          <div className="stat-card"><h3>مستحقات البائعين التقديرية غير المحوّلة</h3><p>{stats.pendingPayouts} د.ل</p></div>
+          <p role="note">الأرقام تقديرية ومحسوبة من الطلبات المسلّمة فقط؛ ولا تعني أن الدفع أو تحويل المستحقات قد تم فعليًا.</p>
           <div className="stat-card"><h3>مستخدمين نشطين</h3><p>{stats.activeUsers}</p></div>
         </div>
       )}
@@ -101,10 +111,11 @@ const AdminDashboard = () => {
         </section>
       )}
 
+      {activeTab === 'disputes' && disputeActionError && <p role="alert" className="error-message">{disputeActionError}</p>}
       {activeTab === 'disputes' && disputes.map(d => (
         <div key={d.id} className="dispute-card"><p>طلب #{d.order_id} - {d.customer_name} ضد {d.seller_name}</p><p>{d.reason}</p>
-          <button onClick={() => handleResolveDispute(d.id, 'refund')}>إعادة المبلغ</button>
-          <button onClick={() => handleResolveDispute(d.id, 'dismiss')}>رفض النزاع</button>
+          <button type="button" disabled>الاسترداد المالي غير مفعّل</button>
+          <button type="button" disabled={busyDisputeId !== null} onClick={() => handleResolveDispute(d.id, 'dismiss')}>{busyDisputeId === d.id ? 'جارٍ المعالجة...' : 'رفض النزاع'}</button>
         </div>
       ))}
     </div>
